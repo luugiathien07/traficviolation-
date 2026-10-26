@@ -1,0 +1,70 @@
+# Cấu hình cho samples/cars.mp4 (640x360). Toạ độ là điểm ảnh của khung hình gốc.
+# Lấy toạ độ: chạy dashboard rồi bấm lên hình camera, hoặc dùng `python run.py --config ... --preview p.jpg`.
+camera_id: cam01
+source: samples/cars.mp4
+loop: true          # phát lại video khi hết (chỉ áp dụng cho file)
+realtime: true      # xử lý theo đúng FPS gốc khi xem trên dashboard
+
+detector:
+  model: models/yolo11n.pt      # đổi sang yolo11s/m.pt để chính xác hơn
+  conf: 0.3
+  imgsz: 960
+  device: null                  # null = tự chọn GPU nếu có; "cpu" để ép chạy CPU
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+# Bù ngược sáng: off | on | auto. Áp dụng trước khi nhận diện, không ảnh hưởng việc đọc màu đèn.
+backlight:
+  mode: auto
+  strength: 0.8         # dùng khi mode = on
+  shadow_gamma: 0.55    # < 1: nâng vùng tối
+  highlight_knee: 210   # vùng sáng hơn ngưỡng này bị nén lại
+  clahe_clip: 2.5
+  clahe_tiles: 8
+  auto_on: 0.40         # điểm ngược sáng để bật (auto)
+  auto_off: 0.25        # điểm ngược sáng để tắt (auto)
+
+# Đọc biển số: tìm biển trong ảnh xe vi phạm rồi OCR. Nếu chưa đọc được, thử tiếp trên các khung hình
+# sau trong retry_seconds giây. Biển phải rộng >= min_plate_width px mới đọc được, nên cần camera đủ phân giải.
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt        # morsetechlab/yolov11-license-plate-detection (AGPL-3.0)
+  ocr_model: cct-s-v2-global-model     # fast-plate-ocr
+  det_conf: 0.25
+  min_conf: 0.6            # độ tin cậy OCR tối thiểu; thấp hơn thì bỏ, để cán bộ nhập tay
+  min_plate_width: 40
+  two_row_mode: best       # best | whole | split (cho biển vuông 2 dòng)
+  retry_seconds: 2.0
+
+# Trạng thái đèn: roi (đọc màu từ vùng ảnh) | timer (chu kỳ cố định) | manual (chỉnh trên dashboard)
+# Video mẫu không quay thấy cột đèn nên dùng timer. Với camera thật, dùng:
+#   mode: roi
+#   roi: [x1, y1, x2, y2]   # khung bao quanh cụm đèn
+light:
+  mode: timer
+  timer: {green: 15, yellow: 3, red: 12, offset: 0}
+
+rules:
+  red_light:
+    enabled: true
+    stop_line: [[150, 125], [470, 125]]   # vạch dừng ảo
+    approach_point: [300, 300]            # một điểm ở phía xe đi tới
+    classes: [car, motorcycle, bus, truck]
+
+  speeding:
+    enabled: true
+    line_a: [[60, 300], [600, 300]]
+    line_b: [[150, 160], [520, 160]]
+    distance_m: 14          # ước lượng từ vạch kẻ đứt (~2 chu kỳ); PHẢI đo lại tại hiện trường
+    limit_kmh: 50
+    tolerance_kmh: 5        # chỉ ghi lỗi khi vượt từ 5 km/h trở lên
+    limit_by_class: {truck: 40, bus: 40}
+
+  wrong_lane:
+    enabled: true
+    min_frames: 8           # số khung hình liên tiếp trong làn trước khi ghi lỗi
+    lanes:
+      - name: lan xe may
+        polygon: [[405, 70], [445, 70], [620, 300], [570, 300]]
+        allowed: [motorcycle]
+        color: [180, 120, 255]

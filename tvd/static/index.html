@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trạm giám sát vi phạm</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0c1013; --panel: #141a1f; --panel-2: #1a2228; --line: #27313a;
+  --fg: #dde5ea; --muted: #8796a1; --amber: #f2b33d;
+  --red: #ff4d4f; --orange: #ff9f43; --violet: #ff7ab4; --ok: #3ccf87;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; padding: 16px; }
+h1 { font-size: 20px; margin: 0; letter-spacing: .02em; text-transform: uppercase; }
+h2 { font-size: 13px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+#live { width: 100%; display: block; border-radius: 6px; background: #000; cursor: crosshair; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 600px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stat b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+button, select, input { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+button { cursor: pointer; }
+button:hover { border-color: #46525e; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: #555; vertical-align: -1px; }
+.list { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow-y: auto; margin-top: 10px; }
+.ev { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; background: var(--panel-2); border-radius: 6px; padding: 8px; border-left: 3px solid var(--c); }
+.ev img { width: 110px; height: 82px; object-fit: cover; border-radius: 4px; background: #000; cursor: zoom-in; }
+.ev .t { color: var(--c); font-weight: 600; text-transform: uppercase; font-size: 13px; }
+.ev .m { color: var(--muted); font-size: 12px; }
+.ev input { width: 130px; padding: 2px 6px; font-size: 12px; }
+.ev button { padding: 2px 8px; font-size: 12px; }
+.st-confirmed { color: var(--ok); } .st-rejected { color: var(--muted); text-decoration: line-through; } .st-pending { color: var(--amber); }
+#pts { width: 100%; min-height: 60px; font-size: 12px; resize: vertical; }
+dialog { background: #000; border: 1px solid var(--line); padding: 0; max-width: 95vw; }
+dialog img { display: block; max-width: 95vw; max-height: 90vh; }
+.empty { color: var(--muted); padding: 20px; text-align: center; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Trạm giám sát vi phạm giao thông</h1>
+    <div class="m mono" id="src" style="color:var(--muted)"></div>
+  </div>
+  <div class="row">
+    <span class="dot" id="lightDot"></span><span id="lightText" class="mono">—</span>
+    <span style="color:var(--muted)">Đèn:</span>
+    <button data-light="auto">Tự động</button>
+    <button data-light="red">Đỏ</button>
+    <button data-light="yellow">Vàng</button>
+    <button data-light="green">Xanh</button>
+    <span style="color:var(--muted);margin-left:8px">Bù ngược sáng:</span>
+    <button data-blc="auto">Tự động</button>
+    <button data-blc="on">Bật</button>
+    <button data-blc="off">Tắt</button>
+    <span id="blcText" class="mono" style="color:var(--muted)">—</span>
+  </div>
+</header>
+
+<div class="grid">
+  <div class="stack">
+    <div class="card"><img id="live" src="/stream.mjpg" alt="Hình ảnh camera đã chú thích"></div>
+    <div class="card stats">
+      <div class="stat"><b id="sVeh">0</b><span>Xe đã nhận diện</span></div>
+      <div class="stat"><b id="sViol">0</b><span>Vi phạm</span></div>
+      <div class="stat"><b id="sTracks">0</b><span>Đang theo dõi</span></div>
+      <div class="stat"><b id="sFps">0</b><span>FPS xử lý</span></div>
+    </div>
+    <div class="card">
+      <h2>Lấy toạ độ để cấu hình</h2>
+      <p class="m" style="margin:0 0 8px;color:var(--muted)">Bấm lên hình camera để lấy toạ độ điểm ảnh gốc (dùng cho vạch dừng, vạch đo tốc độ, đa giác làn trong file YAML).</p>
+      <textarea id="pts" class="mono" readonly></textarea>
+      <div class="row" style="margin-top:6px"><button id="clearPts">Xoá điểm</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Nhật ký vi phạm</h2>
+      <a href="/api/violations.csv" style="color:var(--amber)">Xuất CSV</a>
+    </div>
+    <div class="row" style="margin-top:8px" id="filters"></div>
+    <div class="list" id="list"></div>
+  </div>
+</div>
+<dialog id="dlg"><img id="dlgImg" alt="Ảnh bằng chứng"></dialog>
+
+<script>
+const TYPES = { red_light: ['Vượt đèn đỏ', '#ff4d4f'], speeding: ['Quá tốc độ', '#ff9f43'], wrong_lane: ['Sai làn', '#ff7ab4'] };
+const LIGHT = { red: '#ff4d4f', yellow: '#f2b33d', green: '#3ccf87', unknown: '#555' };
+const CLS = { car: 'Ô tô', motorcycle: 'Xe máy', bus: 'Xe buýt', truck: 'Xe tải' };
+const STATUS = { pending: 'Chờ duyệt', confirmed: 'Đã xác nhận', rejected: 'Đã loại' };
+let filter = '', frameSize = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function stats() {
+  try {
+    const s = await (await fetch('/api/stats')).json();
+    frameSize = s.frame_size;
+    const total = Object.values(s.violations).reduce((a, b) => a + b, 0);
+    $('sVeh').textContent = s.vehicles_seen; $('sViol').textContent = total;
+    $('sTracks').textContent = s.active_tracks; $('sFps').textContent = s.fps.toFixed(1);
+    $('lightDot').style.background = LIGHT[s.light] || '#555';
+    $('lightText').textContent = `${s.light.toUpperCase()} (${s.light_override ? 'chỉnh tay' : s.light_mode})`;
+    const bl = s.backlight;
+    if (bl) {
+      document.querySelectorAll('[data-blc]').forEach(x => x.setAttribute('aria-pressed', x.dataset.blc === bl.mode));
+      $('blcText').textContent = bl.mode === 'off' ? 'tắt' : `${bl.active ? 'đang bù ' + bl.strength.toFixed(1) : 'không cần'} · điểm ${bl.score.toFixed(2)}`;
+    }
+    $('src').textContent = `${s.camera_id} · ${s.source} · ${s.running ? 'đang chạy' : 'đã dừng'}`;
+    $('filters').innerHTML = [['', 'Tất cả', total], ...Object.entries(TYPES).map(([k, [n]]) => [k, n, s.violations[k] || 0])]
+      .map(([k, n, c]) => `<button data-f="${k}" aria-pressed="${filter === k}">${n} <span class="mono">${c}</span></button>`).join('');
+  } catch (e) { $('src').textContent = 'Mất kết nối tới server'; }
+}
+
+async function list() {
+  const rows = await (await fetch('/api/violations?limit=200' + (filter ? '&type=' + filter : ''))).json();
+  const el = $('list');
+  const focused = document.activeElement && el.contains(document.activeElement);
+  if (focused) return; // don't clobber an edit in progress
+  if (!rows.length) { el.innerHTML = '<div class="empty">Chưa có vi phạm nào.</div>'; return; }
+  el.innerHTML = rows.map(r => {
+    const [name, c] = TYPES[r.type] || [r.type, '#aaa'];
+    const when = new Date(r.created_at * 1000).toLocaleTimeString('vi-VN');
+    return `<div class="ev" style="--c:${c}">
+      <img src="/evidence/${esc(r.crop_path || r.frame_path)}" data-full="/evidence/${esc(r.frame_path)}" alt="Bằng chứng #${r.id}">
+      <div>
+        <div class="row" style="justify-content:space-between"><span class="t">${name}</span><span class="m mono">#${r.id} · ${when}</span></div>
+        <div class="m">${CLS[r.vclass] || r.vclass} · track ${r.track_id} · tin cậy ${r.conf.toFixed(2)} · đèn ${esc(r.light)}</div>
+        <div class="m">${esc(r.detail)}</div>
+        <div class="row" style="margin-top:4px">
+          <input placeholder="Biển số" value="${esc(r.plate)}" data-plate="${r.id}" aria-label="Biển số vi phạm ${r.id}">
+          <span class="m st-${r.status}">${STATUS[r.status]}</span>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <button data-st="confirmed" data-id="${r.id}">Xác nhận</button>
+          <button data-st="rejected" data-id="${r.id}">Loại</button>
+        </div>
+      </div></div>`;
+  }).join('');
+}
+
+async function patch(id, body) {
+  await fetch('/api/violations/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button');
+  if (b?.dataset.light) { await fetch('/api/light', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: b.dataset.light }) }); stats(); }
+  if (b?.dataset.blc) { await fetch('/api/backlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: b.dataset.blc }) }); stats(); }
+  if (b?.dataset.f !== undefined) { filter = b.dataset.f; stats(); list(); }
+  if (b?.dataset.st) { await patch(b.dataset.id, { status: b.dataset.st }); list(); }
+  if (e.target.matches('.ev img')) { $('dlgImg').src = e.target.dataset.full; $('dlg').showModal(); }
+  if (e.target.id === 'dlg' || e.target.id === 'dlgImg') $('dlg').close();
+});
+document.addEventListener('change', async e => {
+  if (e.target.dataset.plate) { await patch(e.target.dataset.plate, { plate: e.target.value }); e.target.blur(); list(); }
+});
+
+const pts = [];
+$('live').addEventListener('click', e => {
+  if (!frameSize) return;
+  const r = e.target.getBoundingClientRect();
+  const x = Math.round((e.clientX - r.left) / r.width * frameSize[0]);
+  const y = Math.round((e.clientY - r.top) / r.height * frameSize[1]);
+  pts.push(`[${x}, ${y}]`);
+  $('pts').value = '[' + pts.join(', ') + ']';
+});
+$('clearPts').addEventListener('click', () => { pts.length = 0; $('pts').value = ''; });
+
+stats(); list();
+setInterval(stats, 1500);
+setInterval(list, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+data/
+models/*.pt
+samples/*.mp4
+# test images come from another repository; fetch them with eval/vn/download.sh
+eval/vn/*.jpg
+eval/vn/*.png
+eval/vn/crops/
