@@ -27,6 +27,9 @@ class Track:
     flagged: set[str] = field(default_factory=set)
     plate: str | None = None
     plate_conf: float = 0.0
+    # helmet model votes over frames: summed confidence for "helmet" / "no_helmet"
+    helmet_votes: list[float] = field(default_factory=lambda: [0.0, 0.0])
+    helmet_frames: int = 0
 
     @property
     def anchor(self):
@@ -151,6 +154,59 @@ class WrongLaneRule:
         return []
 
 
+class NoHelmetRule:
+    """Flag a motorcycle once enough frames agree that a rider has no helmet.
+    Votes come from HelmetChecker, which runs a separate helmet / no_helmet model."""
+    type = "no_helmet"
+
+    def __init__(self, cfg: dict):
+        self.min_frames = int(cfg.get("min_frames", 3))
+        self.min_share = float(cfg.get("min_share", 0.6))
+
+    def update(self, tr: Track, light: str) -> list[Violation]:
+        if tr.cls != "motorcycle" or self.type in tr.flagged or tr.helmet_frames < self.min_frames:
+            return []
+        yes, no = tr.helmet_votes
+        share = no / max(yes + no, 1e-6)
+        if share < self.min_share:
+            return []
+        tr.flagged.add(self.type)
+        return [Violation(self.type, tr,
+                          f"Có người trên xe không đội mũ bảo hiểm ({share:.0%} của {tr.helmet_frames} khung hình)",
+                          tr.last_seen)]
+
+
+class NoTurnRule:
+    """Banned turns at an intersection. A vehicle is armed when it crosses `entry_line` coming from
+    `approach_point`'s side, then flagged when it crosses the line of a banned exit
+    (e.g. the far side of the left-turn road)."""
+    type = "no_turn"
+
+    def __init__(self, cfg: dict):
+        self.entry = _pts(cfg["entry_line"])
+        self.approach_sign = np.sign(side(tuple(cfg["approach_point"]), *self.entry))
+        self.exits = [{"name": e["name"], "line": _pts(e["line"]), "classes": set(e.get("classes", VEHICLES))}
+                      for e in cfg["banned_exits"]]
+
+    def update(self, tr: Track, light: str) -> list[Violation]:
+        if self.type in tr.flagged:
+            return []
+        mv = _last_move(tr)
+        if not mv:
+            return []
+        t0, p0, t1, p1 = mv
+        if "entry" not in tr.cross_times:
+            frac = crossing(p0, p1, *self.entry)
+            if frac is not None and np.sign(side(p0, *self.entry)) == self.approach_sign:
+                tr.cross_times["entry"] = t0 + (t1 - t0) * frac
+            return []
+        for ex in self.exits:
+            if tr.cls in ex["classes"] and crossing(p0, p1, *ex["line"]) is not None:
+                tr.flagged.add(self.type)
+                return [Violation(self.type, tr, f"{tr.cls} {ex['name']} tại nơi cấm", t1)]
+        return []
+
+
 def build_rules(cfg: dict) -> list:
     rules = []
     r = cfg.get("rules", {})
@@ -160,4 +216,8 @@ def build_rules(cfg: dict) -> list:
         rules.append(SpeedRule(r["speeding"]))
     if r.get("wrong_lane", {}).get("enabled"):
         rules.append(WrongLaneRule(r["wrong_lane"]))
+    if r.get("no_helmet", {}).get("enabled"):
+        rules.append(NoHelmetRule(r["no_helmet"]))
+    if r.get("no_turn", {}).get("enabled"):
+        rules.append(NoTurnRule(r["no_turn"]))
     return rules

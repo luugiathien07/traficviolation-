@@ -1,0 +1,35 @@
+# Minh hoạ lỗi sai làn trên samples/cars.mp4. GIẢ ĐỊNH làn ngoài cùng bên phải (giữa vạch đứt trắng
+# và vạch vàng của điểm dừng xe buýt) chỉ dành cho xe lớn: xe buýt, xe tải. Đường thật không có quy định này.
+# Cho cả truck vì nhìn từ trên cao, model COCO hay gọi xe buýt là truck.
+camera_id: cam01-lane
+source: samples/cars.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt     # yolo11n hay nhận xe buýt thành truck
+  conf: 0.3
+  imgsz: 960
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+plate:
+  enabled: false        # video 640x360 quá nhỏ để đọc biển số
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  wrong_lane:
+    enabled: true
+    min_frames: 8
+    lanes:
+      - name: lan xe lon (gia dinh)
+        polygon: [[367, 130], [435, 130], [575, 335], [445, 335]]
+        allowed: [bus, truck]
+        color: [0, 200, 255]

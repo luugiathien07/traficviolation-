@@ -98,3 +98,37 @@ def test_normalize_vn_plates():
     assert normalize_vn("5lA-I23.45") == "51A-123.45"   # look-alikes fixed by position
     assert normalize_vn("29PJ8AW3") is None
     assert normalize_vn("ABC") is None
+
+
+def test_no_helmet_rule_needs_agreeing_frames():
+    from tvd.rules import NoHelmetRule
+    rule = NoHelmetRule({"min_frames": 3, "min_share": 0.6})
+    tr = Track(1, "motorcycle", 0.9, (0, 0, 10, 10), 0.0)
+    tr.helmet_votes, tr.helmet_frames = [0.0, 1.8], 2
+    assert rule.update(tr, "green") == []                       # too few frames
+    tr.helmet_votes, tr.helmet_frames = [1.6, 1.2], 4
+    assert rule.update(tr, "green") == []                       # mostly helmet
+    tr.helmet_votes, tr.helmet_frames = [0.5, 2.4], 4
+    assert [v.type for v in rule.update(tr, "green")] == ["no_helmet"]
+    assert rule.update(tr, "green") == []                       # flagged once
+    car = Track(2, "car", 0.9, (0, 0, 10, 10), 0.0)
+    car.helmet_votes, car.helmet_frames = [0.0, 3.0], 5
+    assert rule.update(car, "green") == []
+
+
+def test_no_turn_flags_banned_exit_only_after_entry():
+    from tvd.rules import NoTurnRule
+    rule = NoTurnRule({"entry_line": [[0, 100], [200, 100]], "approach_point": [100, 200],
+                       "banned_exits": [{"name": "re trai", "line": [[0, 0], [0, 100]]}]})
+
+    def drive(points):
+        tr = Track(1, "car", 0.9, (0, 0, 1, 1), 0.0)
+        out = []
+        for i, p in enumerate(points):
+            tr.history.append((i * 0.1, p))
+            out += rule.update(tr, "green")
+        return out
+
+    assert len(drive([(100, 150), (100, 90), (50, 50), (-10, 40)])) == 1   # enters, then turns left
+    assert drive([(100, 150), (100, 90), (100, 20)]) == []                  # goes straight
+    assert drive([(50, 50), (-10, 40)]) == []                               # crosses exit without entering

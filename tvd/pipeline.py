@@ -18,7 +18,8 @@ log = logging.getLogger("tvd")
 
 COCO_IDS = {"bicycle": 1, "car": 2, "motorcycle": 3, "bus": 5, "truck": 7}
 LIGHT_BGR = {"red": (60, 60, 255), "yellow": (40, 190, 250), "green": (100, 210, 60), "unknown": (160, 160, 160)}
-TYPE_BGR = {"red_light": (60, 60, 255), "speeding": (40, 150, 255), "wrong_lane": (255, 120, 180)}
+TYPE_BGR = {"red_light": (60, 60, 255), "speeding": (40, 150, 255), "wrong_lane": (255, 120, 180),
+            "no_helmet": (255, 190, 60), "no_turn": (200, 80, 255)}
 
 
 class Pipeline:
@@ -41,6 +42,8 @@ class Pipeline:
         self.rules = build_rules(cfg)
         self.plate_cfg = cfg.get("plate", {})
         self.plate_reader = None  # loaded in run() when plate.enabled
+        self.helmet_cfg = cfg.get("helmet", {})
+        self.helmet = None        # loaded in run() when helmet.enabled
         # track_id -> {"rows": [violation ids], "until": t, "next": t}; retried on later frames
         self.plate_jobs: dict[int, dict] = {}
 
@@ -60,6 +63,14 @@ class Pipeline:
         from ultralytics import YOLO  # heavy import, keep it lazy
 
         model = YOLO(self.model_path)
+        if self.helmet_cfg.get("enabled") and self.helmet is None:
+            from pathlib import Path
+            if Path(self.helmet_cfg.get("model", "models/helmet.pt")).exists():
+                from .helmet import HelmetChecker
+                self.helmet = HelmetChecker(self.helmet_cfg)
+            else:
+                log.warning("Chưa có model mũ bảo hiểm (%s); bỏ qua luật mũ bảo hiểm. Huấn luyện bằng tools/train_helmet.py",
+                            self.helmet_cfg.get("model", "models/helmet.pt"))
         if self.plate_cfg.get("enabled") and self.plate_reader is None:
             from .plate import PlateReader
             self.plate_reader = PlateReader(self.plate_cfg)
@@ -116,6 +127,7 @@ class Pipeline:
         names = res.names
         violations: list[Violation] = []
         boxes = res.boxes
+        seen: list[Track] = []
         if boxes is not None and boxes.id is not None:
             for xyxy, tid, cls, conf in zip(boxes.xyxy.cpu().numpy(), boxes.id.int().cpu().tolist(),
                                              boxes.cls.int().cpu().tolist(), boxes.conf.cpu().tolist()):
@@ -129,8 +141,13 @@ class Pipeline:
                         self.stats["by_class"][cname] += 1
                 tr.bbox, tr.last_seen, tr.conf = tuple(map(float, xyxy)), t, max(tr.conf, conf)
                 tr.history.append((t, tr.anchor))
-                for rule in self.rules:
-                    violations.extend(rule.update(tr, light))
+                seen.append(tr)
+        # helmet votes need this frame's boxes of every track, so rules run after all tracks moved
+        if self.helmet:
+            self.helmet.update(frame, seen)
+        for tr in seen:
+            for rule in self.rules:
+                violations.extend(rule.update(tr, light))
         # forget tracks not seen for 3 s
         for tid in [k for k, v in self.tracks.items() if t - v.last_seen > 3.0]:
             del self.tracks[tid]
@@ -224,6 +241,14 @@ class Pipeline:
         if r.get("red_light", {}).get("enabled"):
             a, b = r["red_light"]["stop_line"]
             cv2.line(img, tuple(map(int, a)), tuple(map(int, b)), lc, 3, cv2.LINE_AA)
+        if r.get("no_turn", {}).get("enabled"):
+            a, b = r["no_turn"]["entry_line"]
+            cv2.line(img, tuple(map(int, a)), tuple(map(int, b)), (230, 230, 230), 2, cv2.LINE_AA)
+            for ex in r["no_turn"]["banned_exits"]:
+                a, b = ex["line"]
+                cv2.line(img, tuple(map(int, a)), tuple(map(int, b)), TYPE_BGR["no_turn"], 2, cv2.LINE_AA)
+                cv2.putText(img, "cam " + ex["name"], tuple(map(int, a)), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            TYPE_BGR["no_turn"], 1, cv2.LINE_AA)
         if self.light.mode == "roi" and self.light.roi:
             x1, y1, x2, y2 = map(int, self.light.roi)
             cv2.rectangle(img, (x1, y1), (x2, y2), lc, 2)

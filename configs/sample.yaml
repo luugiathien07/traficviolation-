@@ -35,6 +35,20 @@ plate:
   min_plate_width: 40
   two_row_mode: best       # best | whole | split (cho biển vuông 2 dòng)
   retry_seconds: 2.0
+  # Bản Java: đọc biển số mọi xe trên hình (không chỉ xe vi phạm) để hiện trực tiếp trên nhãn xe.
+  read_all: false
+  read_all_every: 0.5      # giây giữa 2 lần đọc của cùng một xe
+  read_all_min_width: 80   # bỏ qua xe có khung hẹp hơn (px), biển quá nhỏ để đọc
+
+# Mũ bảo hiểm: model riêng (helmet / no_helmet) huấn luyện trên HELMET dataset bằng tools/train_helmet.py.
+# Mỗi every_n_frames khung hình chạy một lần, ghép với xe máy đang theo dõi và cộng phiếu theo độ tin cậy.
+helmet:
+  enabled: false          # model v1 báo nhầm quá nhiều người có đội mũ (xem README); chưa dùng thật
+  model: models/helmet.pt
+  conf: 0.35
+  imgsz: 1280
+  every_n_frames: 3
+  min_cover: 0.5          # phần khung xe máy (YOLO COCO) phải nằm trong khung của model mũ
 
 # Trạng thái đèn: roi (đọc màu từ vùng ảnh) | timer (chu kỳ cố định) | manual (chỉnh trên dashboard)
 # Video mẫu không quay thấy cột đèn nên dùng timer. Với camera thật, dùng:
@@ -59,6 +73,11 @@ rules:
     limit_kmh: 50
     tolerance_kmh: 5        # chỉ ghi lỗi khi vượt từ 5 km/h trở lên
     limit_by_class: {truck: 40, bus: 40}
+
+  no_helmet:
+    enabled: false
+    min_frames: 3           # số lần quét có kết quả trước khi kết luận
+    min_share: 0.6          # tỉ lệ phiếu "không đội mũ" tối thiểu
 
   wrong_lane:
     enabled: true

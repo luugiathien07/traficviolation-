@@ -8,3 +8,11 @@ samples/*.mp4
 eval/vn/*.jpg
 eval/vn/*.png
 eval/vn/crops/
+demo_site/
+demo_site_server.py
+datasets/
+runs/
+java/target/
+models/onnx/
+runs_*.log
+weights/

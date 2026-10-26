@@ -1,0 +1,39 @@
+# Thử luật mũ bảo hiểm trên samples/helmet_test.mp4: 7 đoạn thuộc tập test của HELMET dataset
+# (camera Yangon, Myanmar, 1920x1080, 10 fps), model chưa thấy khi huấn luyện.
+# Video này không có vạch/làn đã đo nên chỉ bật luật mũ bảo hiểm.
+camera_id: cam-helmet
+source: samples/helmet_test.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11n.pt
+  conf: 0.25
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+helmet:
+  enabled: true
+  model: models/helmet.pt
+  conf: 0.35
+  imgsz: 1280
+  every_n_frames: 2       # video chỉ 10 fps nên quét dày hơn
+  min_cover: 0.5
+
+plate:
+  enabled: false          # biển số Myanmar, không dùng định dạng Việt Nam
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  no_helmet:
+    enabled: true
+    min_frames: 3
+    min_share: 0.6
