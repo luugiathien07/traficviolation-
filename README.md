@@ -31,13 +31,32 @@ Mục lục: [Tính năng](#tính-năng) · [Cài đặt](#cài-đặt) · [Ch�
 
 ## Cài đặt
 
+Cần Python **3.10–3.12, bản 64-bit**. Tạo môi trường ảo:
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130   # chọn đúng CUDA của máy
-pip install -r requirements.txt
-./models/download.sh     # yolo11n.pt + plate-v1s.pt
-./samples/download.sh    # video mẫu cars.mp4 (camera đường đô thị, 640x360)
-curl -L -o models/yolo11s.pt https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -U pip
+```
+
+Cài PyTorch **đúng với máy** (chạy `nvidia-smi`, xem dòng "CUDA Version" ở góc trên bên phải):
+
+| Máy | Lệnh |
+|---|---|
+| Không có card NVIDIA (chỉ CPU) | `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu` |
+| NVIDIA, CUDA Version ≥ 13.0 | `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130` |
+| NVIDIA, CUDA Version 12.8–12.9 | `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128` |
+| NVIDIA, CUDA Version 12.6–12.7 | `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126` |
+| macOS | `pip install torch torchvision` |
+
+Lỗi `Could not find a version that satisfies the requirement torch (from versions: none)` nghĩa là kho đã chọn không có bản hợp với máy: Python quá cũ hoặc quá mới, Python 32-bit, macOS dùng kho CUDA, hoặc chọn kho CUDA mới hơn driver. Kiểm tra bằng `python --version` và `python -c "import platform, struct; print(platform.system(), platform.machine(), struct.calcsize('P')*8, 'bit')"`. Muốn chạy thử nhanh thì `pip install torch torchvision` (kho mặc định) luôn cài được; không có GPU thì chạy CPU, chậm hơn nhưng đủ để xem demo.
+
+Kiểm tra: `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"` (`True` = dùng được GPU).
+
+Cài phần còn lại:
+
+```bash
+pip install -r requirements.txt    # lỗi khi cài "lap": pip install numpy cython trước; Windows có thể thay bằng pip install lapx
 ```
 
 Các model (`yolo11n/s.pt`, `plate-v1s.pt`, `helmet*.pt`, `vn_signs.pt`, `speed_value.pt`, `lane_icons.pt`) đã có sẵn trong `models/` của repo; `download.sh` chỉ cần khi muốn tải lại bản gốc. Model ONNX cho bản Java không có trong repo: tạo bằng `tools/export_onnx.py`.
