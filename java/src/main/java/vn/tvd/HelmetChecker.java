@@ -19,7 +19,7 @@ import vn.tvd.rules.Track;
  */
 public final class HelmetChecker implements AutoCloseable {
     private final YoloDetector model;
-    private final double conf, minCover;
+    private final double conf, minCover, minHeight;
     private final int every;
     private int n;
 
@@ -28,6 +28,8 @@ public final class HelmetChecker implements AutoCloseable {
         conf = cfg.num("conf", 0.35);
         every = cfg.integer("every_n_frames", 3);
         minCover = cfg.num("min_cover", 0.5);
+        // a far-away motorcycle shows its riders' heads a few pixels tall: no vote, the model would be guessing
+        minHeight = cfg.num("min_box_height", 90);
     }
 
     /** Share of the tracked motorcycle box that lies inside the helmet-model box. */
@@ -39,7 +41,8 @@ public final class HelmetChecker implements AutoCloseable {
 
     public void update(Mat frame, List<Track> tracks) throws OrtException {
         n++;
-        List<Track> motos = tracks.stream().filter(t -> "motorcycle".equals(t.cls)).toList();
+        List<Track> motos = tracks.stream()
+                .filter(t -> "motorcycle".equals(t.cls) && t.bbox[3] - t.bbox[1] >= minHeight).toList();
         if (motos.isEmpty() || n % every != 0) {
             return;
         }
@@ -59,6 +62,7 @@ public final class HelmetChecker implements AutoCloseable {
             }
             tr.helmetVotes[best.cls()] += best.conf();
             tr.helmetFrames++;
+            tr.riderBox = new double[] {best.x1(), best.y1(), best.x2(), best.y2()};  // motorcycle + riders
         }
     }
 

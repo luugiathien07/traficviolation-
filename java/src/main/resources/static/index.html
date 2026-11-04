@@ -45,6 +45,13 @@ button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
 dialog { background: #000; border: 1px solid var(--line); padding: 0; max-width: 95vw; }
 dialog img { display: block; max-width: 95vw; max-height: 90vh; }
 .empty { color: var(--muted); padding: 20px; text-align: center; }
+.sign { display: inline-flex; gap: 6px; align-items: baseline; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 6px; padding: 3px 8px; }
+.sign .mono { color: var(--muted); font-size: 12px; }
+.demos { margin-bottom: 16px; }
+.demos #demos button { padding: 7px 14px; }
+#up { max-width: 520px; }
+#up input[type=file] { max-width: 100%; }
+.ev .plateimg { height: 26px; width: auto; border-radius: 3px; background: #000; vertical-align: middle; cursor: default; }
 </style>
 </head>
 <body>
@@ -68,6 +75,25 @@ dialog img { display: block; max-width: 95vw; max-height: 90vh; }
   </div>
 </header>
 
+<section class="card demos" id="demoCard" hidden>
+  <div class="row" style="justify-content:space-between;align-items:flex-start">
+    <div>
+      <h2>Demo theo từng lỗi</h2>
+      <div class="row" id="demos"></div>
+      <div class="m" id="demoNote" style="color:var(--muted);margin-top:6px"></div>
+      <div class="m" id="camMove" hidden style="color:#ff9f43;margin-top:6px">Camera đang di chuyển (dashcam, quay tay): đã tắt các luật theo vạch / vùng vẽ sẵn (vượt đèn đỏ, tốc độ, làn, ngược chiều, vào đường cấm, vỉa hè, dừng đỗ, giao lộ). Vẫn kiểm tra mũ bảo hiểm, chở quá số người, biển số, biển báo.</div>
+    </div>
+    <form id="up" class="row" style="align-items:center">
+      <h2 style="margin:0;width:100%">Tải video lên để bắt lỗi</h2>
+      <input type="file" name="video" accept="video/*" required aria-label="File video">
+      <select name="template" id="tpl" aria-label="Bộ luật áp dụng"></select>
+      <button type="submit">Tải lên và bắt lỗi</button>
+      <span id="tplNote" class="m" style="color:#ff9f43;width:100%" hidden>Bộ luật của demo dùng vạch / vùng vẽ cho đúng góc camera đó. Chỉ chọn khi video quay từ cùng vị trí camera; dashcam hoặc camera khác hãy chọn bộ luật không cần vẽ vùng.</span>
+      <span id="upMsg" class="m" style="color:var(--muted);width:100%"></span>
+    </form>
+  </div>
+</section>
+
 <div class="grid">
   <div class="stack">
     <div class="card"><img id="live" src="/stream.mjpg" alt="Hình ảnh camera đã chú thích"></div>
@@ -76,6 +102,10 @@ dialog img { display: block; max-width: 95vw; max-height: 90vh; }
       <div class="stat"><b id="sViol">0</b><span>Vi phạm</span></div>
       <div class="stat"><b id="sTracks">0</b><span>Đang theo dõi</span></div>
       <div class="stat"><b id="sFps">0</b><span>FPS xử lý</span></div>
+    </div>
+    <div class="card" id="signCard" hidden>
+      <h2>Biển báo đang thấy</h2>
+      <div class="row" id="signs"></div>
     </div>
     <div class="card">
       <h2>Lấy toạ độ để cấu hình</h2>
@@ -97,7 +127,7 @@ dialog img { display: block; max-width: 95vw; max-height: 90vh; }
 <dialog id="dlg"><img id="dlgImg" alt="Ảnh bằng chứng"></dialog>
 
 <script>
-const TYPES = { red_light: ['Vượt đèn đỏ', '#ff4d4f'], speeding: ['Quá tốc độ', '#ff9f43'], wrong_lane: ['Sai làn', '#ff7ab4'], no_helmet: ['Không đội mũ BH', '#3cbeff'], no_turn: ['Rẽ sai quy định', '#ff50c8'] };
+const TYPES = { red_light: ['Vượt đèn đỏ', '#ff4d4f'], speeding: ['Quá tốc độ', '#ff9f43'], wrong_lane: ['Sai làn', '#ff7ab4'], no_helmet: ['Không đội mũ BH', '#3cbeff'], no_turn: ['Rẽ sai quy định', '#ff50c8'], wrong_way: ['Đi ngược chiều', '#ff8c00'], no_entry: ['Vào đường cấm', '#c85050'], sidewalk: ['Đi trên vỉa hè', '#a0c83c'], no_parking: ['Dừng/đỗ nơi cấm', '#00c8c8'], overload: ['Chở quá số người', '#ffdc00'], solid_line: ['Đè vạch liền', '#e6e600'], no_yield: ['Không nhường người đi bộ', '#78ffff'], block_junction: ['Dừng chắn giao lộ', '#ff3c78'] };
 const LIGHT = { red: '#ff4d4f', yellow: '#f2b33d', green: '#3ccf87', unknown: '#555' };
 const CLS = { car: 'Ô tô', motorcycle: 'Xe máy', bus: 'Xe buýt', truck: 'Xe tải' };
 const STATUS = { pending: 'Chờ duyệt', confirmed: 'Đã xác nhận', rejected: 'Đã loại' };
@@ -115,10 +145,17 @@ async function stats() {
     $('sTracks').textContent = s.active_tracks; $('sFps').textContent = s.fps.toFixed(1);
     $('lightDot').style.background = LIGHT[s.light] || '#555';
     $('lightText').textContent = `${s.light.toUpperCase()} (${s.light_override ? 'chỉnh tay' : s.light_mode})`;
+    $('camMove').hidden = !s.camera_moving;
     const bl = s.backlight;
     if (bl) {
       document.querySelectorAll('[data-blc]').forEach(x => x.setAttribute('aria-pressed', x.dataset.blc === bl.mode));
       $('blcText').textContent = bl.mode === 'off' ? 'tắt' : `${bl.active ? 'đang bù ' + bl.strength.toFixed(1) : 'không cần'} · điểm ${bl.score.toFixed(2)}`;
+    }
+    if (s.signs) {
+      $('signCard').hidden = false;
+      $('signs').innerHTML = s.signs.length
+        ? s.signs.map(g => `<span class="sign">${esc(g.label)} <span class="mono">${g.conf.toFixed(2)}</span></span>`).join('')
+        : '<span style="color:var(--muted)">Chưa thấy biển nào</span>';
     }
     $('src').textContent = `${s.camera_id} · ${s.source} · ${s.running ? 'đang chạy' : 'đã dừng'}`;
     $('filters').innerHTML = [['', 'Tất cả', total], ...Object.entries(TYPES).map(([k, [n]]) => [k, n, s.violations[k] || 0])]
@@ -142,7 +179,9 @@ async function list() {
         <div class="m">${CLS[r.vclass] || r.vclass} · track ${r.track_id} · tin cậy ${r.conf.toFixed(2)} · đèn ${esc(r.light)}</div>
         <div class="m">${esc(r.detail)}</div>
         <div class="row" style="margin-top:4px">
-          <input placeholder="Biển số" value="${esc(r.plate)}" data-plate="${r.id}" aria-label="Biển số vi phạm ${r.id}">
+          <input placeholder="Chưa đọc được biển" value="${esc(r.plate)}" data-plate="${r.id}" aria-label="Biển số vi phạm ${r.id}">
+          ${r.plate_path ? `<img class="plateimg" src="/evidence/${esc(r.plate_path)}" alt="Ảnh biển số">` : ''}
+          ${r.plate && r.plate_conf != null ? `<span class="m mono">tự đọc ${r.plate_conf.toFixed(2)}</span>` : ''}
           <span class="m st-${r.status}">${STATUS[r.status]}</span>
         </div>
         <div class="row" style="margin-top:4px">
@@ -163,7 +202,12 @@ document.addEventListener('click', async e => {
   if (b?.dataset.blc) { await fetch('/api/backlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: b.dataset.blc }) }); stats(); }
   if (b?.dataset.f !== undefined) { filter = b.dataset.f; stats(); list(); }
   if (b?.dataset.st) { await patch(b.dataset.id, { status: b.dataset.st }); list(); }
-  if (e.target.matches('.ev img')) { $('dlgImg').src = e.target.dataset.full; $('dlg').showModal(); }
+  if (b?.dataset.demo) {
+    b.disabled = true; $('upMsg').textContent = 'Đang chuyển demo...';
+    await fetch('/api/demos/' + encodeURIComponent(b.dataset.demo), { method: 'POST' });
+    $('upMsg').textContent = ''; filter = ''; await demos(); stats(); list();
+  }
+  if (e.target.matches('.ev img:not(.plateimg)')) { $('dlgImg').src = e.target.dataset.full; $('dlg').showModal(); }
   if (e.target.id === 'dlg' || e.target.id === 'dlgImg') $('dlg').close();
 });
 document.addEventListener('change', async e => {
@@ -181,7 +225,44 @@ $('live').addEventListener('click', e => {
 });
 $('clearPts').addEventListener('click', () => { pts.length = 0; $('pts').value = ''; });
 
-stats(); list();
+let demoList = [];
+async function demos() {
+  try {
+    const r = await fetch('/api/demos');
+    if (!r.ok) return;  // single-config server: no demo bar
+    const d = await r.json();
+    demoList = d.demos;
+    $('demoCard').hidden = false;
+    $('demos').innerHTML = d.demos.map(x =>
+      `<button data-demo="${esc(x.key)}" aria-pressed="${x.key === d.current}">${esc(x.title)}</button>`).join('');
+    const cur = d.demos.find(x => x.key === d.current);
+    $('demoNote').textContent = cur ? cur.note : d.current.startsWith('upload:') ? 'Video tải lên: ' + d.current.slice(7) : '';
+    if (!$('tpl').options.length) {
+      $('tpl').innerHTML = [...d.templates.map(x => [x.key, x.title]), ...d.demos.map(x => [x.key, 'Vùng của demo: ' + x.title + ' (chỉ cùng góc camera)'])]
+        .map(([k, t]) => `<option value="${esc(k)}">${esc(t)}</option>`).join('');
+    }
+  } catch (e) { /* server not reachable: stats() shows it */ }
+}
+
+$('tpl').addEventListener('change', () => {
+  $('tplNote').hidden = !demoList.some(x => x.key === $('tpl').value);
+});
+
+$('up').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target, btn = form.querySelector('button');
+  btn.disabled = true; $('upMsg').textContent = 'Đang tải lên...';
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: new FormData(form) });
+    const j = await r.json();
+    $('upMsg').textContent = r.ok ? 'Đang bắt lỗi trên video vừa tải lên (xử lý từng khung hình, có thể chậm hơn thời gian thực).' : (j.detail || 'Lỗi tải lên');
+    filter = ''; await demos(); stats(); list();
+  } catch (err) { $('upMsg').textContent = 'Lỗi tải lên: ' + err; }
+  btn.disabled = false;
+});
+
+demos(); stats(); list();
+setInterval(demos, 5000);
 setInterval(stats, 1500);
 setInterval(list, 3000);
 </script>

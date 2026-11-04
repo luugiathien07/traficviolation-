@@ -8,5 +8,6 @@ numpy
 pyyaml
 fastapi
 uvicorn[standard]
+python-multipart
 pytest
 httpx

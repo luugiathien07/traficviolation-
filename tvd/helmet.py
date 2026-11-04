@@ -29,13 +29,15 @@ class HelmetChecker:
         self.imgsz = int(cfg.get("imgsz", 1280))
         self.every = int(cfg.get("every_n_frames", 3))
         self.min_cover = float(cfg.get("min_cover", 0.5))
+        # a far-away motorcycle shows its riders' heads a few pixels tall: no vote, the model would be guessing
+        self.min_height = float(cfg.get("min_box_height", 90))
         self.device = cfg.get("device")
         self._n = 0
         self.last: list[tuple[np.ndarray, int, float]] = []  # boxes of the latest run, for drawing
 
     def update(self, frame: np.ndarray, tracks: list[Track]) -> None:
         self._n += 1
-        motos = [tr for tr in tracks if tr.cls == "motorcycle"]
+        motos = [tr for tr in tracks if tr.cls == "motorcycle" and tr.bbox[3] - tr.bbox[1] >= self.min_height]
         if not motos or self._n % self.every:
             return
         res = self.model(frame, conf=self.conf, imgsz=self.imgsz, device=self.device, verbose=False)[0]
@@ -45,6 +47,7 @@ class HelmetChecker:
             best = max(dets, key=lambda d: _cover(tr.bbox, d[0]), default=None)
             if best is None or _cover(tr.bbox, best[0]) < self.min_cover:
                 continue
-            _, cls, conf = best
+            box, cls, conf = best
             tr.helmet_votes[cls] += conf
             tr.helmet_frames += 1
+            tr.rider_box = tuple(map(float, box))  # motorcycle + riders

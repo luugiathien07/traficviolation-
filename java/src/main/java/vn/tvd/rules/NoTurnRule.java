@@ -13,24 +13,32 @@ import vn.tvd.Geometry;
  * (e.g. the far side of the left-turn road).
  */
 public final class NoTurnRule implements Rule {
-    private record Exit(String name, double[][] line, Set<String> classes) {
+    private record Exit(String name, double[][] line, Set<String> classes, List<String> signs) {
     }
 
     private final double[][] entry;
     private final double approachSign;
     private final List<Exit> exits = new ArrayList<>();
+    private final SignGate gate;
 
     public NoTurnRule(Cfg cfg) {
         entry = cfg.points("entry_line");
         approachSign = Math.signum(Geometry.side(cfg.point("approach_point"), entry[0], entry[1]));
         for (Cfg e : cfg.list("banned_exits")) {
-            exits.add(new Exit(e.str("name", "re"), e.points("line"), Rule.classes(e.strings("classes", VEHICLES))));
+            exits.add(new Exit(e.str("name", "re"), e.points("line"), Rule.classes(e.strings("classes", VEHICLES)),
+                    e.strings("require_sign", List.of())));
         }
+        gate = new SignGate(cfg.num("latch_seconds", 30));
     }
 
     @Override
     public String type() {
         return "no_turn";
+    }
+
+    @Override
+    public void signs(Set<String> visible, double t) {
+        gate.update(visible, t);
     }
 
     @Override
@@ -51,7 +59,7 @@ public final class NoTurnRule implements Rule {
             return List.of();
         }
         for (Exit ex : exits) {
-            if (ex.classes().contains(tr.cls) && !Double.isNaN(Geometry.crossing(p0, p1, ex.line()[0], ex.line()[1]))) {
+            if (ex.classes().contains(tr.cls) && gate.active(ex.signs(), mv[3]) && !Double.isNaN(Geometry.crossing(p0, p1, ex.line()[0], ex.line()[1]))) {
                 tr.flagged.add(type());
                 return List.of(new Violation(type(), tr, tr.cls + " " + ex.name() + " tại nơi cấm", mv[3]));
             }

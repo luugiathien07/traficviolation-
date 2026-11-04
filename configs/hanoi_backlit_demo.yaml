@@ -1,0 +1,51 @@
+# Ngã tư Hà Nội, camera đứng yên ngang tầm đường (1920x1080, 25 fps): 5 phút đầu của "Hanoi Intersection
+# Slow TV", John Butler, YouTube w3HxPfLmk-c, giấy phép CC BY (cần ghi nguồn khi chiếu).
+# Ngược sáng là hiệu ứng giả (tools/make_backlit.py): 45 giây đầu hình gốc, sau đó nắng chói tăng dần trong
+# 15 giây, nên thấy được lúc bù ngược sáng (auto) tự bật. Chạy bằng bản Java vì cần plate.read_all.
+# Không thấy đèn tín hiệu và chưa đo vạch/làn nên không có luật vạch/đèn. Luật mũ bảo hiểm tắt: model
+# helmet.pt (camera Myanmar nhìn từ trên cao) báo nhầm người đội mũ ở góc quay ngang tầm này là không đội.
+camera_id: cam-hanoi
+source: samples/hanoi_backlit.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+helmet:
+  enabled: false
+  model: models/helmet.pt
+  conf: 0.35
+  imgsz: 1280
+  every_n_frames: 3
+  min_cover: 0.5
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  no_helmet:
+    enabled: false
+    min_frames: 3
+    min_share: 0.6

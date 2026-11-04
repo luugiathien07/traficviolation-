@@ -1,0 +1,120 @@
+# Demo TẤT CẢ các lỗi, DÀN DỰNG trên video thật: "Hanoi Intersection Slow TV", John Butler, YouTube w3HxPfLmk-c,
+# giấy phép CC BY (ghi nguồn khi chiếu). Camera đứng yên, xe chạy trái -> phải. Xe là thật; phần dàn dựng:
+#  - đèn tín hiệu, vạch dừng: vẽ thêm (tools/make_violation_demo.py, không vẽ làn)
+#  - biển báo: ảnh biển thật (bộ dữ liệu biển báo VN) dán lên cột (tools/make_sign_demo.py):
+#    P.102 cấm đi ngược chiều, P.103a cấm ô tô, P.131a cấm đỗ, P.127 tốc độ 40 km/h
+# Thêm: chở quá số người, dừng chắn giao lộ. Không bật "không nhường người đi bộ": camera nhìn ngang, người đi bộ
+# và xe phía sau chồng lên nhau trong ảnh nên luật này cần camera nhìn từ trên xuống vạch đi bộ.
+# Model biển báo tự nhận ra các biển; mỗi luật chỉ xét khi thấy biển của nó (require_sign). Không có đoạn rẽ
+# nên không demo lỗi rẽ sai; không có làn theo loại xe thật nên không demo sai làn. Các lỗi chỉ để minh hoạ.
+camera_id: cam-hanoi-tatca
+source: samples/hanoi_all.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600
+  every_n_frames: 10
+  hold_seconds: 3.0
+
+helmet:
+  enabled: true
+  model: models/helmet_vn_v3.pt   # YOLO11s + ảnh VN: Hà Nội nhìn ngang, dashcam nhìn từ sau, Ngã 4 Sở (tools/prepare_vn_helmet.py)
+  conf: 0.35
+  imgsz: 1280
+  every_n_frames: 3
+  min_cover: 0.5
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: roi
+  roi: [1700, 120, 1790, 380]   # hộp đèn vẽ trên video
+
+rules:
+  red_light:
+    enabled: true
+    stop_line: [[1010, 860], [990, 1080]]
+    approach_point: [500, 950]
+    classes: [car, motorcycle, bus, truck]
+
+  speeding:                  # P.127: giới hạn 40 km/h ghi trên biển (người lắp đặt nhập số)
+    enabled: true
+    line_a: [[600, 860], [600, 1080]]
+    line_b: [[1400, 860], [1400, 1080]]
+    distance_m: 8            # ước lượng: ô tô dài ~4 m chiếm ~400 px ở độ sâu này
+    limit_kmh: 40
+    tolerance_kmh: 0
+    require_sign: [speed limit]
+
+  no_helmet:
+    enabled: true
+    min_frames: 6           # số lần quét có kết quả trước khi kết luận
+    min_share: 0.75         # tỉ lệ phiếu "không đội mũ" tối thiểu
+
+  wrong_way:                 # P.102: đường một chiều trái -> phải
+    enabled: true
+    min_dist: 300
+    zones:
+      - name: duong 1 chieu
+        polygon: [[0, 870], [1920, 870], [1920, 1080], [0, 1080]]
+        direction: [1, 0]
+        require_sign: [one way prohibition]
+
+  no_entry:                  # P.103a: ô tô (car, bus, truck) đi từ đầu đường vào đoạn có biển cấm
+    enabled: true
+    min_frames: 8
+    must_enter: true
+    zones:
+      - name: duong cam o to
+        polygon: [[250, 870], [1920, 870], [1920, 1080], [250, 1080]]
+        require_sign: [no car entry/turning]
+
+  no_parking:                # P.131a: đứng yên >= 8 s ở mép đường phía xa (đặt ngắn để demo)
+    enabled: true
+    max_stop_seconds: 8
+    zones:
+      - name: le duong cam do
+        polygon: [[60, 855], [780, 855], [780, 930], [60, 930]]
+        require_sign: [no parking]
+
+  sidewalk:                  # vỉa hè gần camera (không cần biển)
+    enabled: true
+    min_dist: 200
+    zones:
+      - name: via he
+        polygon: [[0, 990], [560, 990], [690, 1068], [0, 1068]]
+        along: [1, 0]
+
+  overload:                  # chở quá số người: >= 3 người cỡ người lớn trên một xe máy (trẻ em không tính)
+    enabled: true
+
+  block_junction:            # dừng chắn giao lộ: đứng yên sau vạch dừng >= 5 s khi đèn đỏ
+    enabled: true
+    zones:
+      - name: giao lo
+        polygon: [[1015, 870], [1920, 870], [1920, 1080], [1000, 1080]]

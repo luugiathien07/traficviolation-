@@ -1,0 +1,80 @@
+# Demo các luật theo BIỂN CẤM, DÀN DỰNG trên video thật: "Hanoi Intersection Slow TV", John Butler, YouTube
+# w3HxPfLmk-c, giấy phép CC BY (ghi nguồn khi chiếu); camera đứng yên, xe chạy trái -> phải.
+# Ba biển là ảnh biển thật (bộ dữ liệu biển báo VN) dán lên cột bằng tools/make_sign_demo.py:
+#   P.102 cấm đi ngược chiều, P.103a cấm ô tô (cột giữa), P.131a cấm đỗ xe (cột gần).
+# Model biển báo tự nhận ra các biển; mỗi vùng chỉ bị xét khi biển của nó đang được nhìn thấy (require_sign).
+# Xe là thật nhưng biển là dán thêm, nên các lỗi chỉ để minh hoạ, không phải lỗi thật.
+camera_id: cam-hanoi-bien
+source: samples/hanoi_signs.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600
+  every_n_frames: 10
+  hold_seconds: 3.0
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  wrong_way:                 # P.102: đường một chiều trái -> phải; đi phải -> trái >= 300 px là ngược chiều
+    enabled: true
+    min_dist: 300
+    zones:
+      - name: duong 1 chieu
+        polygon: [[0, 870], [1920, 870], [1920, 1010], [0, 1010]]
+        direction: [1, 0]
+        require_sign: [one way prohibition]
+
+  no_entry:                  # P.103a: ô tô (car, bus, truck) đi từ đầu đường (mép trái) vào đoạn có biển cấm
+    enabled: true
+    min_frames: 8
+    must_enter: true         # chỉ xe được thấy ở ngoài vùng trước: không tính xe đỗ sẵn / xe bị mất dấu giữa đường
+    zones:
+      - name: duong cam o to
+        polygon: [[250, 870], [1920, 870], [1920, 1080], [250, 1080]]
+        require_sign: [no car entry/turning]
+
+  no_parking:                # P.131a: xe đứng yên >= 20 s ở mép đường phía xa
+    enabled: true
+    max_stop_seconds: 20
+    zones:
+      - name: le duong cam do
+        polygon: [[60, 855], [780, 855], [780, 930], [60, 930]]
+        require_sign: [no parking]
+
+  sidewalk:                  # vỉa hè gần camera (không cần biển): chạy dọc >= 200 px; cắt ngang để vào nhà thì không tính
+    enabled: true
+    min_dist: 200
+    zones:
+      - name: via he
+        polygon: [[0, 990], [560, 990], [690, 1068], [0, 1068]]   # dừng ở y 1068: xe sát camera bị cắt mép dưới hình có điểm bánh xe giả ở y ~1080
+        along: [1, 0]

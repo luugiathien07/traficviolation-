@@ -110,8 +110,18 @@ public final class Store implements AutoCloseable {
     }
 
     public synchronized List<Map<String, Object>> list(String type, String status, int limit) throws SQLException {
+        return list(type, status, limit, null);
+    }
+
+    /** Newest first; null or empty filters are ignored. cameraId limits the list to one demo / camera. */
+    public synchronized List<Map<String, Object>> list(String type, String status, int limit, String cameraId)
+            throws SQLException {
         StringBuilder q = new StringBuilder("SELECT * FROM violations WHERE 1=1");
         List<Object> args = new ArrayList<>();
+        if (cameraId != null && !cameraId.isEmpty()) {
+            q.append(" AND camera_id = ?");
+            args.add(cameraId);
+        }
         if (type != null && !type.isEmpty()) {
             q.append(" AND type = ?");
             args.add(type);
@@ -142,11 +152,21 @@ public final class Store implements AutoCloseable {
     }
 
     public synchronized Map<String, Integer> counts() throws SQLException {
+        return counts(null);
+    }
+
+    public synchronized Map<String, Integer> counts(String cameraId) throws SQLException {
         Map<String, Integer> out = new LinkedHashMap<>();
-        try (Statement st = db.createStatement();
-             ResultSet rs = st.executeQuery("SELECT type, COUNT(*) n FROM violations GROUP BY type")) {
-            while (rs.next()) {
-                out.put(rs.getString(1), rs.getInt(2));
+        boolean one = cameraId != null && !cameraId.isEmpty();
+        try (PreparedStatement ps = db.prepareStatement("SELECT type, COUNT(*) n FROM violations"
+                + (one ? " WHERE camera_id = ?" : "") + " GROUP BY type")) {
+            if (one) {
+                ps.setString(1, cameraId);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.put(rs.getString(1), rs.getInt(2));
+                }
             }
         }
         return out;
@@ -164,20 +184,30 @@ public final class Store implements AutoCloseable {
     }
 
     public synchronized boolean setPlate(long id, String plate) throws SQLException {
-        try (PreparedStatement ps = db.prepareStatement("UPDATE violations SET plate = ? WHERE id = ?")) {
+        // typed by a reviewer: plate_conf cleared so automatic readings never overwrite it
+        try (PreparedStatement ps = db.prepareStatement("UPDATE violations SET plate = ?, plate_conf = NULL WHERE id = ?")) {
             ps.setString(1, plate.strip().toUpperCase());
             ps.setLong(2, id);
             return ps.executeUpdate() > 0;
         }
     }
 
-    /** Store an automatically read plate, unless a reviewer already typed one. */
+    /**
+     * Store an automatically read plate. A later, more confident reading replaces an earlier automatic one;
+     * a plate typed by a reviewer (plate set, plate_conf empty) is never overwritten.
+     */
     public synchronized void setPlateAuto(long id, String plate, double conf, Mat image) throws SQLException {
         String framePath;
-        try (PreparedStatement ps = db.prepareStatement("SELECT frame_path, plate FROM violations WHERE id = ?")) {
+        try (PreparedStatement ps = db.prepareStatement("SELECT frame_path, plate, plate_conf FROM violations WHERE id = ?")) {
             ps.setLong(1, id);
             try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next() || rs.getString(2) != null && !rs.getString(2).isEmpty()) {
+                if (!rs.next()) {
+                    return;
+                }
+                boolean hasPlate = rs.getString(2) != null && !rs.getString(2).isEmpty();
+                double old = rs.getDouble(3);
+                boolean typed = hasPlate && rs.wasNull();
+                if (typed || hasPlate && old >= conf) {
                     return;
                 }
                 framePath = rs.getString(1);

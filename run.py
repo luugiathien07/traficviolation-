@@ -2,12 +2,12 @@
 
   python run.py --config configs/sample.yaml --serve          # dashboard at http://localhost:8000
   python run.py --config configs/sample.yaml --out out.mp4    # headless, write annotated video
+  python run.py --demos configs/demos.yaml --serve            # one button per demo + video upload
 """
 from __future__ import annotations
 
 import argparse
 import logging
-import threading
 
 import yaml
 
@@ -17,7 +17,8 @@ from tvd.storage import Store
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Phát hiện vi phạm giao thông từ video")
-    ap.add_argument("--config", required=True)
+    ap.add_argument("--config", help="file cấu hình YAML (bắt buộc, trừ khi dùng --demos)")
+    ap.add_argument("--demos", help="danh sách demo (mỗi demo một nút trên dashboard) và bộ luật cho video tải lên")
     ap.add_argument("--source", help="ghi đè nguồn video (file, rtsp://..., hoặc số webcam)")
     ap.add_argument("--data", default="data", help="thư mục lưu CSDL và ảnh bằng chứng")
     ap.add_argument("--serve", action="store_true", help="chạy dashboard web")
@@ -30,7 +31,19 @@ def main() -> None:
     ap.add_argument("--preview-frame", type=int, default=75, help="khung hình dùng cho --preview")
     args = ap.parse_args()
 
+    if not args.config and not (args.demos and args.serve):
+        ap.error("cần --config (hoặc --demos cùng --serve)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    store = Store(args.data)
+    if args.demos:
+        import uvicorn
+        from tvd.runner import Runner, load_cfg
+        from tvd.server import create_app
+        runner = Runner(store, load_cfg(args.demos), fast=args.fast)
+        if not runner.demos or not runner.start_demo(runner.demos[0]["key"]):
+            raise SystemExit(f"Không chạy được demo đầu tiên trong {args.demos}")
+        uvicorn.run(create_app(runner, store), host=args.host, port=args.port, log_level="warning")
+        return
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if args.source:
@@ -38,7 +51,6 @@ def main() -> None:
     if args.fast or not args.serve:
         cfg["realtime"] = False
 
-    store = Store(args.data)
     pipe = Pipeline(cfg, store)
 
     if args.preview:
@@ -66,16 +78,12 @@ def main() -> None:
         return
 
     import uvicorn
+    from tvd.runner import Runner
     from tvd.server import create_app
 
-    def worker():
-        try:
-            pipe.run(max_frames=args.max_frames, writer_path=args.out)
-        except Exception:
-            logging.exception("Pipeline dừng do lỗi")
-
-    threading.Thread(target=worker, daemon=True).start()
-    uvicorn.run(create_app(pipe, store), host=args.host, port=args.port, log_level="warning")
+    runner = Runner(store)
+    runner.start("main", cfg)
+    uvicorn.run(create_app(runner, store), host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

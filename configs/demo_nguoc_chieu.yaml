@@ -1,0 +1,54 @@
+# Demo lỗi ĐI NGƯỢC CHIỀU (P.102), DÀN DỰNG trên video thật: "Hanoi Intersection Slow TV", John Butler,
+# YouTube w3HxPfLmk-c, CC BY (ghi nguồn khi chiếu). Xe thật; biển là ảnh biển thật dán lên cột
+# (tools/make_sign_demo.py ... --sign samples/signs/p102_cam_nguoc_chieu.png 572 650 90). Đường coi là một
+# chiều trái -> phải; xe đi phải -> trái >= 300 px (và vẫn đi ngược trong 15 khung hình gần nhất) là vi phạm.
+# Chỉ để minh hoạ.
+camera_id: demo-nguoc-chieu
+source: samples/demo_nguoc_chieu.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600
+  every_n_frames: 10
+  hold_seconds: 3.0
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  wrong_way:
+    enabled: true
+    min_dist: 300
+    zones:
+      - name: duong 1 chieu
+        polygon: [[0, 870], [1920, 870], [1920, 1080], [0, 1080]]
+        direction: [1, 0]
+        require_sign: [one way prohibition]

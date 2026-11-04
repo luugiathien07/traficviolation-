@@ -1,0 +1,36 @@
+# Nhận diện biển báo trên video lái xe thật (camera trong xe, 1920x1080, 30 fps): 6 phút đầu của
+# "Lái xe vào trung tâm Nha Trang từ cao tốc Cam Lâm", kênh Cao Duy Phong, YouTube mLbwXWPyGmc,
+# giấy phép CC BY (cần ghi nguồn khi chiếu). Video không có vạch/làn đã đo nên không bật luật nào.
+camera_id: cam-nhatrang
+source: samples/vn_drive_nhatrang.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11n.pt
+  conf: 0.3
+  imgsz: 960
+  device: cpu            # GPU đang dùng để train; đổi thành null khi GPU rảnh
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: "off"
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  device: cpu
+  conf: 0.4
+  imgsz: 1600            # biển nhỏ, huấn luyện ở 1600
+  every_n_frames: 15     # 2 lần/giây ở 30 fps
+  hold_seconds: 2.0
+
+plate:
+  enabled: false
+
+light:
+  mode: manual
+  initial: green
+
+rules: {}

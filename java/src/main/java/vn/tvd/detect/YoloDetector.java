@@ -54,6 +54,17 @@ public final class YoloDetector implements AutoCloseable {
         size = shape[2] > 0 ? (int) shape[2] : imgsz;
     }
 
+    /** Class names stored by Ultralytics in the ONNX metadata ("{0: 'person', 1: 'bicycle', ...}"). */
+    public java.util.Map<Integer, String> names() throws OrtException {
+        java.util.Map<Integer, String> out = new java.util.HashMap<>();
+        String s = session.getMetadata().getCustomMetadata().getOrDefault("names", "");
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+):\\s*'((?:[^'\\\\]|\\\\.)*)'").matcher(s);
+        while (m.find()) {
+            out.put(Integer.parseInt(m.group(1)), m.group(2));
+        }
+        return out;
+    }
+
     public int inputSize() {
         return size;
     }

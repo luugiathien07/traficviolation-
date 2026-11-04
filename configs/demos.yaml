@@ -1,0 +1,25 @@
+# Dashboard nhiều demo: java/tvd.sh --demos configs/demos.yaml --serve --data data_demos
+# Mỗi demo là một nút; demo đầu tiên chạy khi mở. Ghi nguồn video CC BY khi chiếu (xem đầu từng file cấu hình).
+demos:
+  - key: den_do
+    title: Vượt đèn đỏ
+    config: configs/hcm_redlight_real.yaml
+    note: Video thật TP.HCM, đèn thật (kênh thien thuan, CC BY)
+  - key: vao_duong_cam
+    title: Vào đường cấm
+    config: configs/demo_vao_duong_cam.yaml
+    note: Hà Nội, biển P.103a cấm ô tô dán thêm (John Butler, CC BY)
+  - key: nguoc_chieu
+    title: Đi ngược chiều
+    config: configs/demo_nguoc_chieu.yaml
+    note: Hà Nội, biển P.102 dán thêm (John Butler, CC BY)
+  - key: tong_hop
+    title: Tất cả các lỗi
+    config: configs/hanoi_all_demo.yaml
+    note: Hà Nội, đèn vẽ thêm + 4 biển dán thêm (John Butler, CC BY)
+
+# Bộ luật chọn khi tải video lên. Có thể chọn cả một demo ở trên nếu video quay cùng góc camera đó.
+upload_templates:
+  - key: chung
+    title: Không cần vẽ vùng (biển báo, mũ bảo hiểm, biển số)
+    config: configs/upload_generic.yaml

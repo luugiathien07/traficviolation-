@@ -45,13 +45,17 @@ import vn.tvd.video.FfmpegWriter;
 public final class Pipeline {
     private static final Logger LOG = Logger.getLogger("tvd");
 
-    static final Map<String, Integer> COCO_IDS = Map.of("bicycle", 1, "car", 2, "motorcycle", 3, "bus", 5, "truck", 7);
+    static final Map<String, Integer> COCO_IDS = Map.of("person", 0, "bicycle", 1, "car", 2, "motorcycle", 3, "bus", 5, "truck", 7);
     static final Map<Integer, String> COCO_NAMES = Map.of(1, "bicycle", 2, "car", 3, "motorcycle", 5, "bus", 7, "truck");
     static final Map<String, Scalar> LIGHT_BGR = Map.of("red", new Scalar(60, 60, 255), "yellow", new Scalar(40, 190, 250),
             "green", new Scalar(100, 210, 60), "unknown", new Scalar(160, 160, 160));
-    static final Map<String, Scalar> TYPE_BGR = Map.of("red_light", new Scalar(60, 60, 255),
-            "speeding", new Scalar(40, 150, 255), "wrong_lane", new Scalar(255, 120, 180),
-            "no_helmet", new Scalar(255, 190, 60), "no_turn", new Scalar(200, 80, 255));
+    static final Map<String, Scalar> TYPE_BGR = Map.ofEntries(Map.entry("red_light", new Scalar(60, 60, 255)),
+            Map.entry("speeding", new Scalar(40, 150, 255)), Map.entry("wrong_lane", new Scalar(255, 120, 180)),
+            Map.entry("no_helmet", new Scalar(255, 190, 60)), Map.entry("no_turn", new Scalar(200, 80, 255)),
+            Map.entry("wrong_way", new Scalar(0, 140, 255)), Map.entry("no_entry", new Scalar(80, 80, 200)),
+            Map.entry("sidewalk", new Scalar(60, 200, 160)), Map.entry("no_parking", new Scalar(200, 200, 0)),
+            Map.entry("overload", new Scalar(0, 220, 255)), Map.entry("solid_line", new Scalar(0, 230, 230)),
+            Map.entry("no_yield", new Scalar(255, 255, 120)), Map.entry("block_junction", new Scalar(120, 60, 255)));
     private static final Scalar TRACK_BGR = new Scalar(200, 210, 80);
 
     private final Cfg cfg;
@@ -60,14 +64,18 @@ public final class Pipeline {
     public final String source;
     private final double conf;
     private final Set<Integer> classIds = new HashSet<>();
+    private boolean bikesOnly;
     final boolean loop;
     boolean realtime;
     public final LightSource light;
     public final Backlight backlight;
+    public final CameraMotion motion;
     private final List<Rule> rules;
     private final Cfg plateCfg, helmetCfg;
     private PlateReader plateReader;
     private HelmetChecker helmet;
+    private SignDetector signs;
+    private final Cfg signsCfg;
     private YoloDetector detector;
     private final ByteTracker tracker = new ByteTracker();
     private final Map<Integer, Track> tracks = new LinkedHashMap<>();
@@ -81,6 +89,10 @@ public final class Pipeline {
     }
 
     private final Map<Integer, PlateJob> plateJobs = new LinkedHashMap<>();
+    /** type + plate -> video time of the last saved violation, to drop repeats when a vehicle gets a new track id. */
+    private final Map<String, Double> lastByPlate = new HashMap<>();
+    /** Violation rows of each live track, so a plate read later (read_all) is filled into all of them. */
+    private final Map<Integer, List<Long>> rowsByTrack = new HashMap<>();
 
     public volatile byte[] latestJpeg;
     public volatile int[] frameSize;
@@ -111,13 +123,20 @@ public final class Pipeline {
         for (String c : det.strings("classes", Rule.VEHICLES)) {
             classIds.add(COCO_IDS.get(c));
         }
+        if (Rule.PEOPLE_RULES.stream().anyMatch(k -> cfg.sub("rules").sub(k).enabled())) {
+            classIds.add(COCO_IDS.get("person"));
+            // bicycles too, only to tell cyclists from pedestrians (not tracked unless detector.classes has them)
+            bikesOnly = classIds.add(COCO_IDS.get("bicycle"));
+        }
         loop = cfg.bool("loop", false);
         realtime = cfg.bool("realtime", true);
         light = new LightSource(cfg.sub("light"));
         backlight = new Backlight(cfg.sub("backlight"));
+        motion = new CameraMotion(cfg.sub("camera_motion"));
         rules = Rules.build(cfg);
         plateCfg = cfg.sub("plate");
         helmetCfg = cfg.sub("helmet");
+        signsCfg = cfg.sub("signs");
         stats.put("frames", 0);
         stats.put("fps", 0.0);
         stats.put("active_tracks", 0);
@@ -143,6 +162,9 @@ public final class Pipeline {
             } else {
                 LOG.warning("Chưa có model mũ bảo hiểm (" + hm + "); bỏ qua luật mũ bảo hiểm");
             }
+        }
+        if (signsCfg.enabled() && signs == null) {
+            signs = new SignDetector(signsCfg);
         }
         if (plateCfg.enabled() && plateReader == null) {
             plateReader = new PlateReader(plateCfg);
@@ -209,6 +231,17 @@ public final class Pipeline {
         return vehiclesSeen;
     }
 
+    /** Free the models (GPU memory) once run() has returned, e.g. when the dashboard switches to another demo. */
+    public void close() throws Exception {
+        for (AutoCloseable c : new AutoCloseable[] {detector, helmet, signs, plateReader}) {
+            if (c != null) {
+                c.close();
+            }
+        }
+        plateImg.values().forEach(Mat::release);
+        plateImg.clear();
+    }
+
     public Mat process(Mat raw, double t) throws Exception {
         frameSize = new int[] {raw.cols(), raw.rows()};
         String lightState = light.update(raw, t);  // raw frame: enhancement would shift lamp colours
@@ -219,9 +252,23 @@ public final class Pipeline {
                 dump.printf(Locale.ROOT, "%.2f %d %.1f %.1f %.1f %.1f %.3f%n", t, d.cls(), d.x1(), d.y1(), d.x2(), d.y2(), d.conf());
             }
         }
+        // riders and pedestrians go to the rules, not to the tracker (it would hand a motorbike's id to its rider)
+        List<double[]> people = new ArrayList<>(), bikes = new ArrayList<>();
+        List<Detection> vehicles = new ArrayList<>();
+        for (Detection d : dets) {
+            if (d.cls() == 0) {
+                people.add(d.xyxy());
+            } else if (d.cls() == 1 && bikesOnly) {
+                bikes.add(d.xyxy());
+            } else {
+                vehicles.add(d);
+            }
+        }
+        // a person over a bicycle is a cyclist, neither a pedestrian nor a motorbike rider
+        people.removeIf(p -> bikes.stream().anyMatch(b -> vn.tvd.rules.OverloadRule.cover(p, b) >= 0.25));
         List<Violation> violations = new ArrayList<>();
         List<Track> seen = new ArrayList<>();
-        for (STrack st : tracker.update(dets)) {
+        for (STrack st : tracker.update(vehicles)) {
             String cname = COCO_NAMES.getOrDefault(st.cls(), "car");
             double[] box = st.xyxy();
             Track tr = tracks.get(st.id());
@@ -235,6 +282,7 @@ public final class Pipeline {
             }
             tr.bbox = box;
             tr.lastSeen = t;
+            tr.clsVotes.merge(cname, 1, Integer::sum);
             tr.conf = Math.max(tr.conf, st.score());
             tr.addHistory(t);
             seen.add(tr);
@@ -243,8 +291,24 @@ public final class Pipeline {
         if (helmet != null) {
             helmet.update(frame, seen);
         }
+        if (signs != null) {
+            signs.update(frame, t);
+            stats.put("signs", signs.summary());
+            Set<String> visible = signs.visibleNames();
+            for (Rule rule : rules) {
+                rule.signs(visible, t);
+            }
+        }
+        for (Rule rule : rules) {
+            rule.people(people, seen, t);
+        }
+        // dashcam / handheld: lines and zones drawn for a fixed camera no longer fit, and parked cars seem to move
+        boolean moving = motion.update(frame, seen.stream().map(tr -> tr.bbox).toList());
         for (Track tr : seen) {
             for (Rule rule : rules) {
+                if (moving && rule.fixedCamera()) {
+                    continue;
+                }
                 violations.addAll(rule.update(tr, lightState));
             }
         }
@@ -253,6 +317,7 @@ public final class Pipeline {
             Map.Entry<Integer, Track> e = it.next();
             if (t - e.getValue().lastSeen > 3.0) {
                 it.remove();
+                rowsByTrack.remove(e.getKey());
                 Mat m = plateImg.remove(e.getKey());
                 if (m != null) {
                     m.release();
@@ -275,6 +340,7 @@ public final class Pipeline {
         stats.put("vehicles_seen", vehiclesSeen);
         stats.put("active_tracks", (int) tracks.values().stream().filter(v -> v.lastSeen == t).count());
         stats.put("light", lightState);
+        stats.put("camera_moving", motion.moving);
         stats.put("backlight", Map.of("mode", backlight.mode, "active", backlight.active,
                 "score", Math.round(backlight.score * 1000) / 1000.0,
                 "strength", Math.round(backlight.appliedStrength * 100) / 100.0));
@@ -291,7 +357,27 @@ public final class Pipeline {
 
     private void save(Mat raw, Mat annotated, Violation v, String lightState) throws Exception {
         Track tr = v.track();
+        if (tr.plate != null) {
+            Double last = lastByPlate.put(v.type() + "|" + tr.plate, v.t());
+            if (last != null && Math.abs(v.t() - last) < cfg.num("dedupe_seconds", 15)) {
+                LOG.info("Bỏ lỗi trùng " + v.type() + " của xe " + tr.plate + " (track mới #" + tr.id + ")");
+                return;
+            }
+        }
         int x1 = (int) tr.bbox[0], y1 = (int) tr.bbox[1], x2 = (int) tr.bbox[2], y2 = (int) tr.bbox[3];
+        if ("no_helmet".equals(v.type()) && tr.riderBox != null) {
+            // the motorcycle box leaves out the riders' heads: crop the helmet-model box (bike + riders) as well
+            x1 = Math.min(x1, (int) tr.riderBox[0]);
+            y1 = Math.min(y1, (int) tr.riderBox[1]);
+            x2 = Math.max(x2, (int) tr.riderBox[2]);
+            y2 = Math.max(y2, (int) tr.riderBox[3]);
+        }
+        if ("overload".equals(v.type()) && tr.overloadBox != null) {
+            x1 = (int) tr.overloadBox[0];
+            y1 = (int) tr.overloadBox[1];
+            x2 = (int) tr.overloadBox[2];
+            y2 = (int) tr.overloadBox[3];
+        }
         int h = raw.rows(), w = raw.cols();
         int pad = (int) (0.15 * Math.max(x2 - x1, y2 - y1)) + 8;
         Mat crop = raw.submat(clampRect(x1 - pad, y1 - pad, x2 + pad, y2 + pad, w, h)).clone();
@@ -302,6 +388,7 @@ public final class Pipeline {
         long rowId = store.add(cameraId, v.t(), v.type(), tr.id, tr.cls, tr.conf, v.speedKmh(), lightState, v.detail(),
                 evidence, crop);
         LOG.info(String.format("VI PHẠM #%d %s track=%d %s (%s)", rowId, v.type(), tr.id, tr.cls, v.detail()));
+        rowsByTrack.computeIfAbsent(tr.id, k -> new ArrayList<>()).add(rowId);
         if (plateReader != null) {
             if (tr.plate != null) {
                 store.setPlateAuto(rowId, tr.plate, tr.plateConf, plateImg.getOrDefault(tr.id, crop));
@@ -387,6 +474,10 @@ public final class Pipeline {
                 if (old != null) {
                     old.release();
                 }
+                // a better reading after the violation was saved: fill it into the vehicle's violations too
+                for (long rowId : rowsByTrack.getOrDefault(tr.id, List.of())) {
+                    store.setPlateAuto(rowId, res.text(), res.conf(), res.image());
+                }
             }
         }
     }
@@ -410,7 +501,8 @@ public final class Pipeline {
 
     public Mat annotate(Mat frame, double t, String lightState) {
         Mat img = frame.clone();
-        Cfg r = cfg.sub("rules");
+        // a moving camera has its lines and zones in the wrong place: don't draw them (their rules are off)
+        Cfg r = motion.moving ? new Cfg(Map.of()) : cfg.sub("rules");
         Scalar lc = LIGHT_BGR.getOrDefault(lightState, LIGHT_BGR.get("unknown"));
         int font = Imgproc.FONT_HERSHEY_SIMPLEX, aa = Imgproc.LINE_AA;
         if (r.sub("wrong_lane").enabled()) {
@@ -426,6 +518,27 @@ public final class Pipeline {
             }
             Core.addWeighted(overlay, 0.18, img, 0.82, 0, img);
             overlay.release();
+        }
+        for (String kind : vn.tvd.rules.ZoneRule.KINDS) {
+            if (!r.sub(kind).enabled()) {
+                continue;
+            }
+            Scalar zc = TYPE_BGR.get(kind);
+            for (Cfg z : r.sub(kind).list("zones")) {
+                double[][] poly = z.points("polygon");
+                Point[] pts = new Point[poly.length];
+                for (int i = 0; i < poly.length; i++) {
+                    pts[i] = pt(poly[i]);
+                }
+                Imgproc.polylines(img, List.of(new MatOfPoint(pts)), true, zc, 2, aa);
+                Imgproc.putText(img, ascii(z.str("name", kind)), new Point(pts[0].x + 6, pts[0].y + 20), font, 0.6, zc, 2, aa);
+                double[] d = z.has("direction") ? z.numbers("direction") : null;
+                if (d != null) {  // allowed direction of travel
+                    double n = Math.hypot(d[0], d[1]);
+                    Point c = new Point(pts[0].x + 60, pts[0].y + 45);
+                    Imgproc.arrowedLine(img, c, new Point(c.x + 80 * d[0] / n, c.y + 80 * d[1] / n), zc, 3, aa, 0, 0.3);
+                }
+            }
         }
         if (r.sub("speeding").enabled()) {
             for (String key : List.of("line_a", "line_b")) {
@@ -446,6 +559,31 @@ public final class Pipeline {
                 Imgproc.putText(img, "cam " + ascii(ex.str("name", "")), pt(e[0]), font, 0.45, TYPE_BGR.get("no_turn"), 1, aa);
             }
         }
+        if (r.sub("solid_line").enabled()) {
+            Scalar sc = TYPE_BGR.get("solid_line");
+            for (Cfg ln : r.sub("solid_line").list("lines")) {
+                double[][] p = ln.points("points");
+                for (int i = 0; i + 1 < p.length; i++) {
+                    Imgproc.line(img, pt(p[i]), pt(p[i + 1]), sc, 3, aa);
+                }
+                Imgproc.putText(img, ascii(ln.str("name", "vach lien")), pt(p[0]), font, 0.5, sc, 1, aa);
+            }
+        }
+        if (r.sub("no_yield").enabled()) {
+            Scalar yc = TYPE_BGR.get("no_yield");
+            for (Cfg c : r.sub("no_yield").list("crosswalks")) {
+                double[][] poly = c.points("polygon");
+                Point[] pts = new Point[poly.length];
+                for (int i = 0; i < poly.length; i++) {
+                    pts[i] = pt(poly[i]);
+                }
+                Imgproc.polylines(img, List.of(new MatOfPoint(pts)), true, yc, 2, aa);
+                Imgproc.putText(img, ascii(c.str("name", "vach nguoi di bo")), new Point(pts[0].x + 6, pts[0].y + 20), font, 0.6, yc, 2, aa);
+            }
+        }
+        if (signs != null) {
+            signs.draw(img);
+        }
         if ("roi".equals(light.mode) && light.roi != null) {
             Imgproc.rectangle(img, new Point(light.roi[0], light.roi[1]), new Point(light.roi[2], light.roi[3]), lc, 2);
         }
@@ -461,13 +599,19 @@ public final class Pipeline {
             if (tr.speedKmh != null) {
                 label.append(String.format(Locale.ROOT, " %.0fkm/h", tr.speedKmh));
             }
-            if (tr.plate != null) {
-                label.append(" [").append(tr.plate).append("]");
-            }
             int[] base = new int[1];
             Size ts = Imgproc.getTextSize(label.toString(), font, 0.42, 1, base);
             Imgproc.rectangle(img, new Point(x1, y1 - ts.height - 6), new Point(x1 + ts.width + 6, y1), color, -1);
             Imgproc.putText(img, label.toString(), new Point(x1 + 3, y1 - 4), font, 0.42, new Scalar(20, 20, 20), 1, aa);
+            if (tr.plate != null) {
+                // plate as its own large tag inside the bottom of the box: yellow like a VN plate, black text
+                Size ps = Imgproc.getTextSize(tr.plate, font, 0.9, 2, base);
+                int px = Math.max(x1, Math.min((x1 + x2) / 2 - (int) ps.width / 2 - 6, img.cols() - (int) ps.width - 12));
+                int py = Math.max(y1 + (int) ps.height + 12, y2 - 4);
+                Imgproc.rectangle(img, new Point(px, py - ps.height - 12), new Point(px + ps.width + 12, py), new Scalar(0, 215, 255), -1);
+                Imgproc.rectangle(img, new Point(px, py - ps.height - 12), new Point(px + ps.width + 12, py), new Scalar(20, 20, 20), 2);
+                Imgproc.putText(img, tr.plate, new Point(px + 6, py - 6), font, 0.9, new Scalar(20, 20, 20), 2, aa);
+            }
             if (tr.history.size() > 1) {
                 List<Point> pts = new ArrayList<>();
                 for (double[] h : tr.history) {
@@ -481,6 +625,9 @@ public final class Pipeline {
                 lightState.toUpperCase(Locale.ROOT), light.overridden() ? " (tay)" : "", vehiclesSeen);
         if (backlight.active) {
             hud += String.format(Locale.ROOT, "  BLC %.1f", backlight.appliedStrength);
+        }
+        if (motion.moving) {
+            hud += "  CAMERA DI DONG: tat luat theo vach/vung";
         }
         Imgproc.rectangle(img, new Point(0, 0), new Point(img.cols(), 26), new Scalar(15, 15, 15), -1);
         Imgproc.circle(img, new Point(14, 13), 7, lc, -1);

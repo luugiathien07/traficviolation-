@@ -1,0 +1,57 @@
+# Bộ luật cho video TẢI LÊN từ dashboard khi chưa có cấu hình vùng cho camera đó (source, camera_id do
+# server điền). Chỉ chạy những gì không cần vẽ vạch / vùng: nhận diện và theo dõi xe, đọc biển số mọi xe,
+# nhận diện biển báo, kiểm tra mũ bảo hiểm. Muốn bắt vượt đèn đỏ / sai làn / ngược chiều... cần vẽ vạch dừng,
+# vùng làn cho đúng góc camera (bấm lên hình để lấy toạ độ) rồi thêm vào demos.yaml.
+camera_id: upload
+source: ""
+loop: false
+realtime: false
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600
+  every_n_frames: 10
+  hold_seconds: 3.0
+
+helmet:
+  enabled: true
+  model: models/helmet_vn_v3.pt
+  conf: 0.35
+  imgsz: 1280
+  every_n_frames: 3
+  min_cover: 0.5
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  no_helmet:
+    enabled: true
+    min_frames: 6           # số lần quét có kết quả trước khi kết luận
+    min_share: 0.75         # tỉ lệ phiếu "không đội mũ" tối thiểu

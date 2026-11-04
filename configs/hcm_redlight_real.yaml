@@ -1,0 +1,47 @@
+# Vượt đèn đỏ THẬT: đèn tín hiệu thật (có đếm ngược) và xe máy vượt đèn thật, không vẽ thêm gì.
+# Nguồn: "Bắt xe máy vượt đèn đỏ ở ngã ba", kênh "thien thuan", YouTube OyJsMd8Gj7o, giấy phép CC BY
+# (ghi nguồn khi chiếu). Dashcam ô tô đứng chờ đèn đỏ ở TP.HCM; đoạn 0:31.5-1:19.5 của video gốc (48 s, 30 fps):
+# xe chủ đứng yên gần như suốt đoạn nên dùng như camera cố định; đèn đỏ ~0-45 s, chuyển xanh ~45 s rồi xe chủ chạy đi.
+# Chỉ bật luật vượt đèn đỏ: tốc độ / sai làn chưa có căn cứ biển báo ở cảnh này.
+camera_id: cam-hcm-den-that
+source: samples/hcm_redlight_real.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: roi
+  roi: [1800, 340, 1813, 395]   # sát thân đèn thật góc phải trên (đèn + số đếm ngược), tránh biển vàng phía sau
+
+rules:
+  red_light:
+    enabled: true
+    stop_line: [[650, 795], [1920, 800]]   # mép gần của vạch người đi bộ, phần đường chiều của xe chủ
+    approach_point: [1200, 950]            # xe đi từ phía camera ra xa
+    classes: [car, motorcycle, bus, truck]
+  speeding:
+    enabled: false
+  wrong_lane:
+    enabled: false

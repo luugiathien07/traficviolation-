@@ -12,6 +12,15 @@ public final class SpeedRule implements Rule {
     private final double distanceM, limit, tolerance;
     private final Cfg limitByClass;
     private final Set<String> classes;
+    /** Limit from a speed-limit sign while it is seen; otherwise default_limit_kmh (TT 38/2024), or no check. */
+    private final List<String> signs;
+    private final Double defaultLimit;
+    private final SignGate gate;
+    private final double latch;
+    private double now;
+    /** Number read from the speed-limit sign ("speed limit 50" from SignDetector) and when it was last seen. */
+    private Integer signKmh;
+    private double signSeenAt;
 
     public SpeedRule(Cfg cfg) {
         la = cfg.points("line_a");
@@ -21,6 +30,10 @@ public final class SpeedRule implements Rule {
         tolerance = cfg.num("tolerance_kmh", 5);
         limitByClass = cfg.sub("limit_by_class");
         classes = Rule.classes(cfg.strings("classes", VEHICLES));
+        signs = cfg.strings("require_sign", List.of());
+        defaultLimit = cfg.has("default_limit_kmh") ? cfg.num("default_limit_kmh", 50) : null;
+        latch = cfg.num("latch_seconds", 30);
+        gate = new SignGate(latch);
     }
 
     @Override
@@ -30,6 +43,32 @@ public final class SpeedRule implements Rule {
 
     public double limitFor(String cls) {
         return limitByClass.num(cls, limit);
+    }
+
+    @Override
+    public void signs(Set<String> visible, double t) {
+        gate.update(visible, t);
+        now = t;
+        for (String s : visible) {
+            if (s.matches("speed limit \\d+")) {
+                signKmh = Integer.parseInt(s.substring(12));
+                signSeenAt = t;
+            }
+        }
+    }
+
+    /**
+     * The limit in force: the number read from the sign; else the configured one while the sign is seen
+     * (per class); else the default one without a sign; or null for no check.
+     */
+    private Double limitNow(String cls) {
+        if (signKmh != null && now - signSeenAt <= latch) {
+            return (double) signKmh;
+        }
+        if (gate.active(signs, now)) {
+            return limitFor(cls);
+        }
+        return defaultLimit == null ? null : limitByClass.sub("default").num(cls, defaultLimit);
     }
 
     @Override
@@ -58,12 +97,17 @@ public final class SpeedRule implements Rule {
             return List.of();
         }
         tr.speedKmh = distanceM / dt * 3.6;
-        double lim = limitFor(tr.cls), excess = tr.speedKmh - lim;
+        Double limNow = limitNow(tr.cls);
+        if (limNow == null) {
+            return List.of();
+        }
+        double lim = limNow, excess = tr.speedKmh - lim;
         if (excess < tolerance) {
             return List.of();
         }
         tr.flagged.add(type());
-        String detail = String.format(Locale.ROOT, "%.0f km/h, giới hạn %.0f km/h (+%.0f)", tr.speedKmh, lim, excess);
+        String source = signs.isEmpty() ? "" : gate.active(signs, now) ? " theo biển" : " mặc định TT 38/2024";
+        String detail = String.format(Locale.ROOT, "%.0f km/h, giới hạn %.0f km/h%s (+%.0f)", tr.speedKmh, lim, source, excess);
         return List.of(new Violation(type(), tr, detail, mv[3], tr.speedKmh));
     }
 }

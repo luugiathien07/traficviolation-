@@ -27,6 +27,20 @@ public final class Rules {
         if (r.sub("no_turn").enabled()) {
             rules.add(new NoTurnRule(r.sub("no_turn")));
         }
+        if (r.sub("overload").enabled()) {
+            rules.add(new OverloadRule(r.sub("overload")));
+        }
+        if (r.sub("solid_line").enabled()) {
+            rules.add(new SolidLineRule(r.sub("solid_line")));
+        }
+        if (r.sub("no_yield").enabled()) {
+            rules.add(new NoYieldRule(r.sub("no_yield")));
+        }
+        for (String kind : ZoneRule.KINDS) {
+            if (r.sub(kind).enabled()) {
+                rules.add(new ZoneRule(kind, r.sub(kind)));
+            }
+        }
         return rules;
     }
 }

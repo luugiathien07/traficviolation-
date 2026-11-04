@@ -20,6 +20,7 @@ import cv2
 import numpy as np
 
 MODES = ("off", "on", "auto")
+METHODS = ("curve", "retinex")
 
 
 class BacklightCompensator:
@@ -35,6 +36,11 @@ class BacklightCompensator:
         self.off_at = float(cfg.get("auto_off", 0.25))        # score to switch off in auto
         self.clahe = cv2.createCLAHE(clipLimit=float(cfg.get("clahe_clip", 2.5)),
                                      tileGridSize=(int(cfg.get("clahe_tiles", 8)),) * 2)
+        self.method = cfg.get("method", "curve")              # "curve" or "retinex"
+        if self.method not in METHODS:
+            raise ValueError(f"backlight.method must be one of {METHODS}")
+        self.sigmas = [float(s) for s in cfg.get("retinex_sigmas", [60, 250, 600])]  # px at 1080p
+        self.clip_pct = float(cfg.get("retinex_clip", 3.0))   # % of darkest/brightest cut when stretching
         self.score = 0.0      # smoothed backlight score 0..1
         self.active = False   # whether compensation is currently applied
         self.applied_strength = 0.0
@@ -87,6 +93,31 @@ class BacklightCompensator:
         self.applied_strength = strength
         if not self.active:
             return frame
+        if self.method == "retinex":
+            return self._retinex(frame, lab[..., 0], strength)
         L = cv2.LUT(L, self._lut(strength))
         lab[..., 0] = self.clahe.apply(L)
         return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
+    def _retinex(self, frame: np.ndarray, L: np.ndarray, strength: float) -> np.ndarray:
+        """Multi-scale Retinex on luminance: log(L) minus log of its blur at several scales removes the
+        illumination (sun glare, shade) and keeps reflectance (the vehicles). The result is stretched to
+        0..255 by percentiles, blended with L by strength, and the gain is applied to B, G, R alike so
+        colours keep their ratios."""
+        h, w = L.shape
+        k = 4  # blurs at 1/4 resolution: big sigmas are slow at full size and illumination is smooth
+        Lf = L.astype(np.float32) + 1.0
+        log_l = np.log(Lf)
+        small = cv2.resize(log_l, (w // k, h // k), interpolation=cv2.INTER_AREA)
+        scale = h / 1080.0 / k
+        msr = np.zeros_like(log_l)
+        for s in self.sigmas:
+            blur = cv2.GaussianBlur(small, (0, 0), max(s * scale, 0.5))
+            msr += log_l - cv2.resize(blur, (w, h), interpolation=cv2.INTER_LINEAR)
+        msr /= len(self.sigmas)
+        lo, hi = np.percentile(msr[::4, ::4], (self.clip_pct, 100.0 - self.clip_pct))
+        out_l = np.clip((msr - lo) / max(hi - lo, 1e-6), 0.0, 1.0) * 255.0
+        new_l = (1.0 - strength) * Lf + strength * out_l
+        gain = (new_l + 1.0) / Lf
+        return np.clip(frame.astype(np.float32) * gain[..., None], 0, 255).astype(np.uint8)

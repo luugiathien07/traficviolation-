@@ -71,8 +71,12 @@ class Store:
             self.db.commit()
             return cur.lastrowid
 
-    def list(self, type: str | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+    def list(self, type: str | None = None, status: str | None = None, limit: int = 100,
+             camera_id: str | None = None) -> list[dict]:
+        """Newest first; camera_id limits the list to one demo / camera."""
         q, args = "SELECT * FROM violations WHERE 1=1", []
+        if camera_id:
+            q += " AND camera_id = ?"; args.append(camera_id)
         if type:
             q += " AND type = ?"; args.append(type)
         if status:
@@ -81,9 +85,10 @@ class Store:
         with self.lock:
             return [dict(r) for r in self.db.execute(q, args)]
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, camera_id: str | None = None) -> dict[str, int]:
+        where, args = (" WHERE camera_id = ?", [camera_id]) if camera_id else ("", [])
         with self.lock:
-            rows = self.db.execute("SELECT type, COUNT(*) n FROM violations GROUP BY type").fetchall()
+            rows = self.db.execute(f"SELECT type, COUNT(*) n FROM violations{where} GROUP BY type", args).fetchall()
         return {r["type"]: r["n"] for r in rows}
 
     def set_status(self, vid: int, status: str) -> bool:
@@ -95,10 +100,11 @@ class Store:
             return cur.rowcount > 0
 
     def set_plate_auto(self, vid: int, plate: str, conf: float, image: np.ndarray) -> None:
-        """Store an automatically read plate, unless a reviewer already typed one."""
+        """Store an automatically read plate. A later, more confident reading replaces an earlier automatic
+        one; a plate typed by a reviewer (plate set, plate_conf empty) is never overwritten."""
         with self.lock:
-            row = self.db.execute("SELECT frame_path, plate FROM violations WHERE id = ?", (vid,)).fetchone()
-        if row is None or row["plate"]:
+            row = self.db.execute("SELECT frame_path, plate, plate_conf FROM violations WHERE id = ?", (vid,)).fetchone()
+        if row is None or row["plate"] and (row["plate_conf"] is None or row["plate_conf"] >= conf):
             return
         rel = row["frame_path"].replace("_frame.jpg", "_plate.jpg")
         cv2.imwrite(str(self.evidence / rel), image, [cv2.IMWRITE_JPEG_QUALITY, 95])
@@ -109,6 +115,8 @@ class Store:
 
     def set_plate(self, vid: int, plate: str) -> bool:
         with self.lock:
-            cur = self.db.execute("UPDATE violations SET plate = ? WHERE id = ?", (plate.strip().upper(), vid))
+            # typed by a reviewer: plate_conf cleared so automatic readings never overwrite it
+            cur = self.db.execute("UPDATE violations SET plate = ?, plate_conf = NULL WHERE id = ?",
+                                  (plate.strip().upper(), vid))
             self.db.commit()
             return cur.rowcount > 0

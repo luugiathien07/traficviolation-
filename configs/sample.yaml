@@ -50,6 +50,16 @@ helmet:
   every_n_frames: 3
   min_cover: 0.5          # phần khung xe máy (YOLO COCO) phải nằm trong khung của model mũ
 
+# Biển báo: model YOLO huấn luyện trên biển báo Việt Nam bằng tools/train_signs.py. Chạy trên cả khung hình
+# mỗi every_n_frames khung, hiện biển đang thấy trên hình và dashboard; chưa tự đổi luật theo biển.
+signs:
+  enabled: false          # video mẫu không có biển báo; thử bằng configs/signs_demo.yaml
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600             # biển nhỏ (rộng trung vị ~26 px) nên cần ảnh lớn
+  every_n_frames: 5
+  hold_seconds: 2.0       # còn liệt kê biển này bao lâu sau lần cuối thấy
+
 # Trạng thái đèn: roi (đọc màu từ vùng ảnh) | timer (chu kỳ cố định) | manual (chỉnh trên dashboard)
 # Video mẫu không quay thấy cột đèn nên dùng timer. Với camera thật, dùng:
 #   mode: roi

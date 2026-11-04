@@ -1,0 +1,35 @@
+# Thử nhận diện biển báo trên samples/vn_signs_test.mp4: 90 ảnh thuộc tập test của bộ dữ liệu
+# biển báo Việt Nam (camera hành trình, 1622x626), model chưa thấy khi huấn luyện; mỗi ảnh giữ 1,5 giây.
+# Video không có vạch/làn đã đo nên không bật luật nào, chỉ hiện biển báo trên hình và dashboard.
+camera_id: cam-signs
+source: samples/vn_signs_test.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11n.pt
+  conf: 0.25
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: "off"
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600            # biển nhỏ (rộng trung vị ~26 px), huấn luyện ở 1600
+  every_n_frames: 5
+  hold_seconds: 2.0
+
+plate:
+  enabled: false
+
+light:
+  mode: manual
+  initial: green
+
+rules: {}

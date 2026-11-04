@@ -1,0 +1,61 @@
+# Demo vượt đèn đỏ DÀN DỰNG trên video thật: ngã tư Hà Nội, camera đứng yên (1920x1080, 25 fps), 5 phút đầu
+# của "Hanoi Intersection Slow TV", John Butler, YouTube w3HxPfLmk-c, giấy phép CC BY (ghi nguồn khi chiếu).
+# Đèn tín hiệu, vạch dừng và vạch làn "XE MAY" là hình vẽ thêm (tools/make_violation_demo.py --lane-y 962:
+# xanh 12 s, vàng 3 s, đỏ 10 s); xe thật không thấy chúng nên xe qua vạch lúc đèn đỏ, ô tô vào làn xe máy bị
+# tính lỗi. Giới hạn tốc độ 25 km/h cũng đặt thấp để có lỗi. Chỉ để minh hoạ, không phải lỗi thật.
+# Hệ thống đọc màu đèn từ hình (light.mode: roi) như với camera thật. Chạy bằng bản Java (plate.read_all).
+camera_id: cam-hanoi-den
+source: samples/hanoi_redlight.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: roi
+  roi: [1700, 120, 1790, 380]   # hộp đèn vẽ trên video
+
+rules:
+  red_light:
+    enabled: true
+    stop_line: [[1010, 860], [990, 1080]]   # vạch dừng vẽ trên video
+    approach_point: [500, 950]              # xe chạy từ trái sang phải
+    classes: [car, motorcycle, bus, truck]
+
+  speeding:
+    enabled: true
+    line_a: [[600, 860], [600, 1080]]
+    line_b: [[1400, 860], [1400, 1080]]
+    distance_m: 8           # ước lượng: ô tô dài ~4 m chiếm ~400 px ở độ sâu này
+    limit_kmh: 25           # đặt thấp để demo; đường phố thật thường 40-50 km/h
+    tolerance_kmh: 0
+
+  wrong_lane:
+    enabled: true
+    min_frames: 8
+    lanes:
+      - name: lan xe may
+        polygon: [[0, 962], [1920, 962], [1920, 1080], [0, 1080]]
+        allowed: [motorcycle]
+        color: [180, 120, 255]

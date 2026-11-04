@@ -14,8 +14,14 @@ public final class NoHelmetRule implements Rule {
     private final double minShare;
 
     public NoHelmetRule(Cfg cfg) {
-        minFrames = cfg.integer("min_frames", 3);
-        minShare = cfg.num("min_share", 0.6);
+        // 3 frames at 60% flagged riders who wore a helmet: ask for more and clearer agreement
+        minFrames = cfg.integer("min_frames", 6);
+        minShare = cfg.num("min_share", 0.75);
+    }
+
+    @Override
+    public boolean fixedCamera() {
+        return false;
     }
 
     @Override

@@ -1,0 +1,53 @@
+# Demo lỗi VÀO ĐƯỜNG CẤM (P.103a cấm ô tô), DÀN DỰNG trên video thật: "Hanoi Intersection Slow TV",
+# John Butler, YouTube w3HxPfLmk-c, CC BY (ghi nguồn khi chiếu). Xe thật; biển là ảnh biển thật dán lên cột
+# (tools/make_sign_demo.py ... --sign samples/signs/p103a_cam_oto.png 572 650 90). Model biển báo tự nhận
+# ra biển; ô tô / xe buýt / xe tải đi từ đầu đường vào đoạn có biển là vi phạm. Chỉ để minh hoạ.
+camera_id: demo-vao-duong-cam
+source: samples/demo_vao_duong_cam.mp4
+loop: true
+realtime: true
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.3
+  imgsz: 1280
+  device: null
+  tracker: bytetrack.yaml
+  classes: [car, motorcycle, bus, truck]
+
+backlight:
+  mode: auto
+
+signs:
+  enabled: true
+  model: models/vn_signs.pt
+  conf: 0.4
+  imgsz: 1600
+  every_n_frames: 10
+  hold_seconds: 3.0
+
+plate:
+  enabled: true
+  detector: models/plate-v1s.pt
+  det_conf: 0.25
+  min_conf: 0.6
+  min_plate_width: 25
+  two_row_mode: best
+  retry_seconds: 2.0
+  read_all: true
+  read_all_every: 0.3
+  read_all_min_width: 60
+
+light:
+  mode: manual
+  initial: green
+
+rules:
+  no_entry:
+    enabled: true
+    min_frames: 8
+    must_enter: true         # chỉ xe được thấy ở ngoài vùng trước: không tính xe đỗ sẵn / xe bị mất dấu giữa đường
+    zones:
+      - name: duong cam o to
+        polygon: [[250, 870], [1920, 870], [1920, 1080], [250, 1080]]
+        require_sign: [no car entry/turning]   # cấm car, bus, truck (SignGate.BANS)

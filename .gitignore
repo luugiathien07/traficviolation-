@@ -16,3 +16,6 @@ java/target/
 models/onnx/
 runs_*.log
 weights/
+# dữ liệu chạy demo (CSDL, ảnh bằng chứng, video tải lên)
+data_*/
+/*.pt
