@@ -2,8 +2,16 @@
 __pycache__/
 .pytest_cache/
 data/
-models/*.pt
 samples/*.mp4
+# video nhỏ (< 100 MB) được đưa lên git; video demo lớn tạo lại bằng tools/make_*.py
+!samples/cars.mp4
+!samples/car-detection.mp4
+!samples/highway.mp4
+!samples/person-bicycle-car-detection.mp4
+!samples/hcm_redlight_real.mp4
+!samples/helmet_test.mp4
+!samples/raw_nga4so.mp4
+!samples/vn_signs_test.mp4
 # test images come from another repository; fetch them with eval/vn/download.sh
 eval/vn/*.jpg
 eval/vn/*.png
