@@ -42,7 +42,14 @@ curl -L -o models/yolo11s.pt https://github.com/ultralytics/assets/releases/down
 
 Các model (`yolo11n/s.pt`, `plate-v1s.pt`, `helmet*.pt`, `vn_signs.pt`, `speed_value.pt`, `lane_icons.pt`) đã có sẵn trong `models/` của repo; `download.sh` chỉ cần khi muốn tải lại bản gốc. Model ONNX cho bản Java không có trong repo: tạo bằng `tools/export_onnx.py`.
 
-Video mẫu nhỏ (`cars.mp4`, `hcm_redlight_real.mp4`, `helmet_test.mp4`, `raw_nga4so.mp4`, `vn_signs_test.mp4`…) có sẵn trong `samples/`. Video demo lớn (> 100 MB: `hanoi_*.mp4`, `demo_*.mp4`, `vo_van_kiet.mp4`, `vn_drive_nhatrang.mp4`, `raw_hanoi_slowtv.mp4`) không có trong repo: tải video gốc từ YouTube theo nguồn ghi ở đầu mỗi file cấu hình, rồi tạo lại bằng các lệnh ở mục [Tự làm video demo](#tự-làm-video-demo).
+Video mẫu nhỏ (`cars.mp4`, `hcm_redlight_real.mp4`, `helmet_test.mp4`, `raw_nga4so.mp4`, `vn_signs_test.mp4`…) có sẵn trong `samples/`. Video demo lớn (> 100 MB: `hanoi_*.mp4`, `demo_*.mp4`, `vo_van_kiet.mp4`, `vn_drive_nhatrang.mp4`, `raw_hanoi_slowtv.mp4`) không nằm trong git mà ở GitHub Release `demo-videos` (~1,6 GB):
+
+```bash
+gh release download demo-videos -D samples -R luugiathien07/traficviolation-
+cd samples && sha256sum -c SHA256SUMS && cd ..
+```
+
+Hoặc tạo lại từ video gốc bằng các lệnh ở mục [Tự làm video demo](#tự-làm-video-demo).
 
 ## Chạy demo
 
